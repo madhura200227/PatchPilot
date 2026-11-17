@@ -166,8 +166,26 @@ export async function createWorkspaceMcpServer(config: WorkspaceMcpServerConfig)
         }
 
         try {
-          // Pass request through streamable HTTP transport
-          await transport.handleRequest(req, res);
+          const rawBody = Buffer.concat(chunks).toString("utf8");
+          let parsedBody: unknown = undefined;
+          if (rawBody.trim().length > 0) {
+            try {
+              parsedBody = JSON.parse(rawBody);
+            } catch {
+              if (!res.headersSent) {
+                res.writeHead(400, { "Content-Type": "application/json" });
+                res.end(
+                  JSON.stringify({
+                    jsonrpc: "2.0",
+                    error: { code: -32700, message: "Parse error: Invalid JSON" },
+                    id: null,
+                  })
+                );
+              }
+              return;
+            }
+          }
+          await transport.handleRequest(req, res, parsedBody);
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);
           if (!res.headersSent) {

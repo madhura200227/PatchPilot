@@ -262,7 +262,7 @@ export async function getWorkspaceStatus(workspaceRoot: string): Promise<Workspa
     for (const line of lines) {
       if (!line) continue;
       const code = line.slice(0, 2);
-      const filePath = line.slice(3).trim();
+      const filePath = line.slice(2).trim();
       if (code === "??") {
         untrackedFiles.push(filePath);
       } else {
