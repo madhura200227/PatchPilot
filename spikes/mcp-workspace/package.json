@@ -1,0 +1,27 @@
+{
+  "name": "patchpilot-mcp-workspace",
+  "version": "0.1.0",
+  "description": "Authenticated MCP Workspace Server with strict isolation for TrueForge Agent integration",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "fixture:create": "node scripts/fixture-manager.ts",
+    "start": "node dist/server.js",
+    "test:security": "node dist/tests/security.test.js",
+    "test:protocol": "node dist/tests/mcp-protocol.test.js",
+    "test:isolation": "node dist/tests/isolation.test.js",
+    "test:adapter": "node dist/tests/adapter.test.js",
+    "test:cancellation": "node dist/tests/cancellation.test.js",
+    "test:trueforge": "node dist/tests/trueforge-integration.test.js",
+    "test:all": "node dist/tests/run-all-tests.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "typescript": "^5.7.3"
+  }
+}
