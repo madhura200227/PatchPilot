@@ -1,0 +1,23 @@
+{
+  "name": "trueforge-runtime-spike",
+  "version": "0.1.0",
+  "description": "PatchPilot feasibility spike for TrueForge SDK & Agent Runtime integration",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "info": "node --loader ts-node/esm src/runtime-info.ts",
+    "test:client": "node dist/client.js",
+    "test:session": "node dist/session-test.js",
+    "test:streaming": "node dist/streaming-test.js",
+    "test:cancellation": "node dist/cancellation-test.js"
+  },
+  "dependencies": {
+    "@truefoundry/trueforge-sdk": "0.185.0",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "typescript": "^5.7.3"
+  }
+}
