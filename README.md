@@ -535,6 +535,7 @@ PatchPilot will employ a multi-layered testing strategy:
 
 The complete documentation foundation for PatchPilot is structured across the following specifications:
 
+- **[docs/PRD.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/PRD.md):** The Product Requirements Document (PRD v0.1.0) and Initial Technical Design.
 - **[PATCHPILOT_INITIAL_ENGINEERING_DOCUMENTATION.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/PATCHPILOT_INITIAL_ENGINEERING_DOCUMENTATION.md):** The primary engineering requirements, problem analysis, and foundational specification.
 - **[docs/ARCHITECTURE.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/ARCHITECTURE.md):** In-depth technical architecture of the 5 layers, RepoBrain design, TrueForge integration contract, and SQLite persistence schema.
 - **[docs/WORKFLOWS.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/WORKFLOWS.md):** Complete lifecycle sequence diagrams, hunk review state machines, self-healing verification logic, and cancellation/crash recovery replay mechanisms.
