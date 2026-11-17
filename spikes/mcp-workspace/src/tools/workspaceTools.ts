@@ -173,7 +173,8 @@ export async function writeWorkspaceFile(
 export async function runWorkspaceTests(
   workspaceRoot: string,
   testFile?: string,
-  timeoutMs: number = 5000
+  timeoutMs: number = 5000,
+  signal?: AbortSignal
 ): Promise<RunTestsResult> {
   // Use approved test target
   const target = testFile || "tests/calculator.test.mjs";
@@ -194,6 +195,7 @@ export async function runWorkspaceTests(
       windowsHide: true,
       shell: false, // Critical: prevent shell execution & command injection
       env: cleanEnv,
+      signal: signal || undefined,
     });
 
     const durationMs = Date.now() - startTime;
@@ -206,13 +208,16 @@ export async function runWorkspaceTests(
     };
   } catch (err: unknown) {
     const durationMs = Date.now() - startTime;
-    const execErr = err as { code?: number | string; stdout?: string; stderr?: string; killed?: boolean };
+    const execErr = err as { code?: number | string; stdout?: string; stderr?: string; killed?: boolean; name?: string };
 
+    const isAborted = execErr.name === "AbortError" || signal?.aborted;
     return {
-      exitCode: typeof execErr.code === "number" ? execErr.code : 1,
+      exitCode: typeof execErr.code === "number" ? execErr.code : (isAborted ? 130 : 1),
       passed: false,
       stdout: (execErr.stdout || "").trim(),
-      stderr: (execErr.stderr || (err instanceof Error ? err.message : String(err))).trim(),
+      stderr: isAborted
+        ? "Execution cancelled via AbortSignal"
+        : (execErr.stderr || (err instanceof Error ? err.message : String(err))).trim(),
       durationMs,
     };
   }
