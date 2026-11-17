@@ -3,79 +3,123 @@
 **Competition:** TrueFoundry Forge-a-thon — Techfest, IIT Bombay  
 **Target Category:** Editor-Native Coding Agent (VS Code Extension)  
 **Agent Harness:** TrueForge (`@truefoundry/trueforge-sdk`)  
-**Demonstration Repository:** `pallets/flask`
+**Demonstration Repository:** `pallets/flask`  
+**Documentation Authority:** Subordinate to [docs/PRD.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/PRD.md)
 
 ---
 
-## 1. Compliance Traceability Matrix
+## 1. Competition Requirements Classification
 
-The table below maps every competition requirement established by TrueFoundry and Techfest IIT Bombay directly to PatchPilot's architectural design and implementation status.
+To maintain strict compliance and technical honesty, all statements regarding the competition are categorized into four distinct levels of authority:
 
-| Competition Requirement | Evaluation Criteria | PatchPilot Architectural Enforcement | Implementation Status |
+### Category A: Confirmed Official Competition Requirements
+*Source: Official Techfest Competition Listing (<https://techfest.org/competitions/forge-a-thon>)*
+
+1. **Eligibility & Team Size:** Open to participants aged 18+; teams of up to 5 members.
+2. **Registration:** Mandatory online registration via Techfest portal to obtain a valid Team ID.
+3. **Key Deadlines:**
+   - Registration: 15 October – 15 November 2026
+   - Round 1 Submission: 20 November 2026, 23:59 IST
+   - Round 1 Results: 30 November 2026
+   - Round 2 Finals (On-site at IIT Bombay): 16 – 18 December 2026
+4. **Prize Pool:** ₹3,00,000 total prize pool.
+5. **Round 1 Submission Deliverables:**
+   - Public GitHub repository.
+   - 1–3 page technical write-up in PDF format.
+   - Public demonstration video of maximum 4 minutes.
+   - Execution of three fixed tasks (Tasks A, B, and C) on `pallets/flask`.
+6. **Core Runtime Mandate:** Agent loops must run strictly on **TrueForge**.
+7. **Model Configuration:** Models must be configured through TrueForge and declared in the write-up.
+8. **Originality & Licensing:** Code must be original or use properly licensed open-source forks with attribution.
+9. **Core Product Capabilities:**
+   - Navigating and understanding large repositories.
+   - Autonomous, unprompted multi-file code modifications.
+   - Hunk-by-hunk diff review.
+   - Reliability under model failures.
+   - Immediate cancellation capability.
+10. **Judges' Authority:** Decisions of organizers and judges are final and binding.
+
+### Category B: Requirements Derived from Official TrueForge Architecture
+*Source: Official TrueForge Documentation (<https://github.com/truefoundry/trueforge>)*
+
+1. **Sole Loop Authority:** TrueForge owns model calls, tool dispatch, context management, and session state. The extension must not run a secondary model loop.
+2. **Client Bridge:** Official TypeScript SDK (`@truefoundry/trueforge-sdk`) connects the extension to the TrueForge server/daemon.
+3. **Tool Model:** Tools are exposed to TrueForge via Model Context Protocol (MCP) or native tool definitions.
+4. **Token Optimization:** Relies on TrueForge's context compaction mechanism to handle token limits in large repositories.
+5. **Human Checkpoints:** Interactive tool approvals and user decisions are handled through TrueForge-supported human checkpoint mechanisms.
+
+### Category C: Proposed PatchPilot Engineering Decisions
+*Source: PatchPilot Technical Design (Internal Architecture — Not Competition Mandates)*
+
+1. **Git Worktree Isolation:** Using temporary Git worktrees (`.patchpilot/worktrees/wt-<id>`) to keep developer working trees clean during execution.
+2. **Hunk Intelligence Engine:** Custom diff decomposition and Webview interface for selective hunk staging.
+3. **RepoBrain Staged Retrieval:** Combining `ripgrep` lexical search (P0) with Tree-sitter AST symbol extraction (P1).
+4. **SQLite Checkpoint Store:** Embedded SQLite database (`.patchpilot/session.db`) for extension-side session, hunk, and recovery persistence.
+5. **Patch Passport Manifest:** Standardized JSON evidence receipt capturing user prompt, plan, diffs, test logs, and review decisions.
+6. **Bounded Self-Healing Loop:** Running `pytest` inside the worktree and feeding error diagnostics back to TrueForge (maximum 3 retry attempts).
+
+### Category D: Unverified Assumptions & Items Awaiting Organizer Confirmation
+*Status: Open Decisions Register (PRD Section 27)*
+
+| ID | Item | Status | Action Required |
 | :--- | :--- | :--- | :--- |
-| **1. TrueForge-Only Loop** | The agent execution loop must run strictly on TrueForge. No independent model-driven loops. | **Strict Architectural Mandate:** TrueForge owns the autonomous agent loop. PatchPilot implements the VS Code UI, local tool harness (RepoBrain, Git worktrees, test runner), and evidence logging. All reasoning and planning pass through `@truefoundry/trueforge-sdk`. | Architecture Proposed & Documented; Implementation Pending |
-| **2. Editor-Native Extension** | Must be implemented as a Visual Studio Code extension. | Implemented using the standard VS Code Extension API (`^1.90.0`), featuring Custom Webviews for Chat, Hunk Review, and Patch Passport. | Architecture Proposed & Documented; Implementation Pending |
-| **3. Large Repository Handling** | Must navigate large real-world repositories without context exhaustion. | Evaluated against `pallets/flask`. RepoBrain couples Tree-sitter AST symbol extraction with `ripgrep` lexical search to construct token-compact context slices. | Architecture Proposed & Documented; Implementation Pending |
-| **4. Autonomous Multi-File Edits** | Must execute multi-file modifications without manual file-by-file prompting. | TrueForge agent plans and executes cross-file edits transactionally inside an isolated Git worktree. | Architecture Proposed & Documented; Implementation Pending |
-| **5. Hunk-by-Hunk Review** | Must provide safe, granular diff inspection prior to committing. | Custom Hunk Review Webview decomposes unified diffs into semantic hunks, enabling per-hunk `[Accept]`, `[Reject]`, and `[Re-prompt]` decisions. | Architecture Proposed & Documented; Implementation Pending |
-| **6. Model Failure Recovery** | Must demonstrate resilience against model timeouts, failures, or bad tool calls. | SQLite-backed monotonic checkpointing engine (`.patchpilot/session.db`) allows deterministic resumption. Self-healing loop automatically feeds test errors back to TrueForge. | Architecture Proposed & Documented; Implementation Pending |
-| **7. Immediate Cancellation** | Must support immediate cancellation of long-running operations. | `CancellationManager` dispatches `AbortSignal` to TrueForge SDK, sends `SIGINT`/`SIGTERM` to active subprocesses, and dismantles temporary worktrees with zero residual pollution. | Architecture Proposed & Documented; Implementation Pending |
-| **8. Flask Demonstration** | Must demonstrate proficiency on three fixed tasks in `pallets/flask`. | Automated test validation against official Flask test suite (`pytest`) across three core scenarios. | Benchmark Protocol Established; Demonstration Pending Implementation |
+| **OD-01** | Exact wording and acceptance criteria for **Task A** | Awaiting Organizer Material | Do not invent task prompt; use generic fixture for internal testing only. |
+| **OD-02** | Exact wording and acceptance criteria for **Task B** | Awaiting Organizer Material | Do not invent task prompt; use generic fixture for internal testing only. |
+| **OD-03** | Exact wording and acceptance criteria for **Task C** | Awaiting Organizer Material | Do not invent task prompt; use generic fixture for internal testing only. |
+| **OD-04** | Allowed TrueForge deployment topology during evaluation (local, self-hosted, or cloud) | Awaiting Organizer Clarification | Support local daemon configuration as default; query organizers. |
+| **OD-05** | Workspace transport: MCP bridge vs mounted/synced container sandbox | Architecture Spike Pending | Evaluate during Milestone 0. |
+| **OD-06** | Exact SDK version and cancellation API methods | Awaiting Pinned SDK Spike | Validate against installed `@truefoundry/trueforge-sdk`. |
+| **OD-07** | Permitted model providers and API key constraints during judging | Team Decision / Clarification | Disclose selected models in submission write-up. |
+| **OD-08** | Final team member roles and attribution | Team Decision | Confirm before submission. |
+| **OD-09** | Detailed official judging rubric and scoring weights | Not Established from Public Page | Design for balanced excellence across all capabilities; do not fabricate weights. |
+| **OD-10** | Final public repository URL | Pending Confirmation | Verify repository accessibility before deadline. |
 
 ---
 
-## 2. The Primary Demonstration Repository: `pallets/flask`
+## 2. The Primary Demonstration Target: `pallets/flask`
 
-The TrueFoundry Forge-a-thon designates **`pallets/flask`** as the primary evaluation target. `pallets/flask` is an ideal testbed because:
-- It represents a mature, widely used open-source Python framework.
-- It possesses a complex cross-file architecture spanning core routing, context locals, sans-I/O scaffolding, and Blueprint registration.
-- It maintains a comprehensive test suite (`pytest`) with high test coverage, strict type hinting, and established documentation conventions.
+The TrueFoundry Forge-a-thon designates **`pallets/flask`** as the primary evaluation target.
 
-### Official Demonstration Scenarios
-Without fabricating unreleased task prompts, PatchPilot is evaluated across three core engineering categories:
+### Official Task Status
+- **Tasks A, B, and C:** The exact official task prompts, target files, and acceptance criteria have **not been publicly released** on the competition portal.
+- **Pre-Competition Testing Policy:** The team must **not invent or guess** official prompts. For internal engineering rehearsal prior to official prompt release, the team uses synthetic test fixtures against `pallets/flask` to validate:
+  1. Multi-file navigation and editing across core modules (e.g., `scaffold.py`, `blueprints.py`, `app.py`).
+  2. Test execution and failure diagnostics using Flask's test suite (`pytest tests/`).
+  3. Immediate cancellation and worktree cleanup during active tool execution.
 
-1. **Task Scenario 1 — Cross-Module Feature Enhancement / Refactoring:**
-   - Involves modifying routing logic or Blueprint handling across multiple files (e.g., `src/flask/sansio/scaffold.py`, `src/flask/blueprints.py`).
-   - Requires updating associated unit test cases in `tests/test_routing.py` or `tests/test_blueprints.py`.
-   - Demonstrates: Autonomous multi-file planning, worktree isolation, and self-healing when initial tests fail.
-
-2. **Task Scenario 2 — Bug Fix with Regression Testing:**
-   - Addresses a subtle edge case in request handling, error formatting, or cookie handling.
-   - Requires introducing a targeted fix and adding a new regression test case.
-   - Demonstrates: AST symbol navigation in RepoBrain, precise diff generation, and hunk-level acceptance.
-
-3. **Task Scenario 3 — Context-Aware Multi-File Typing & Documentation:**
-   - Involves updating type annotations and docstrings across several core modules.
-   - Evaluates: Handling cancellation midway through execution to prove zero workspace pollution, followed by successful checkpoint recovery.
+Once official prompts for Tasks A, B, and C are published by organizers, this section and corresponding test fixtures will be updated to record the exact official text.
 
 ---
 
-## 3. Four-Minute Competition Demonstration Protocol
+## 3. Four-Minute Demonstration Structure (Provisional Allocation)
 
-The Forge-a-thon Round 1 video submission requires a strict 4-minute technical walkthrough:
+The competition requires a video submission of no more than four minutes demonstrating Tasks A, B, and C on `pallets/flask`. The timing below represents a provisional storytelling plan:
 
-```mermaid
-timeline
-    title 4-Minute Demonstration Video Schedule
-    0:00 - 0:45 : Architecture & Workspace Cleanliness : Present TrueForge sole-loop architecture; show clean pallets/flask repo with existing uncommitted developer files.
-    0:45 - 1:45 : Task 1 Execution & Isolation : Prompt agent with Task 1; RepoBrain extracts symbols; TrueForge generates plan; isolated worktree created.
-    1:45 - 2:45 : Verification & Hunk Intelligence : Run pytest in worktree; simulate test failure & agent self-healing; open Hunk Review UI for selective accept/reject.
-    2:45 - 3:30 : Tasks 2 & 3 & Cancellation : Execute Task 2 bugfix; trigger Task 3 and click Cancel; demonstrate instant SIGINT teardown & zero residue.
-    3:30 - 4:00 : Patch Passport Audit : Open generated Patch Passport; inspect prompt, diffs, test logs, and TrueForge token telemetry.
-```
+| Time | Demonstration Segment | Content & Integrity Rules |
+| :--- | :--- | :--- |
+| **0:00 – 0:15** | **Problem & Architecture** | Introduce PatchPilot, TrueForge runtime integration, and the problem of unverified AI modifications. |
+| **0:15 – 1:00** | **Official Task A** | Demonstrate repository understanding and multi-file planning on `pallets/flask` using official Task A prompt. |
+| **1:00 – 1:45** | **Official Task B** | Demonstrate autonomous multi-file editing and Hunk Intelligence review on official Task B. |
+| **1:45 – 2:30** | **Official Task C** | Demonstrate task execution and automated test verification (`pytest`) on official Task C. |
+| **2:30 – 3:30** | **Resilience: Cancellation & Recovery** | Demonstrate immediate cancellation (showing worktree teardown) and idempotent checkpoint recovery. |
+| **3:30 – 4:00** | **Patch Passport Audit** | Inspect the generated Patch Passport manifest, showing factual test logs and review decisions. |
 
-### Protocol Guidelines:
-- **No Fabricated Outcomes:** Demonstration records real executions against `pallets/flask` test suites.
-- **Proof of Isolation:** Visual demonstration in VS Code that uncommitted developer edits on the `main` branch are neither overwritten nor committed.
-- **Proof of Verification:** Visual inspection of `pytest` logs and exit codes within the Patch Passport manifest.
+### Integrity Rules for Demonstration:
+- All demonstrations must show actual TrueForge runtime executions; no simulated or mocked events.
+- Test logs must reflect actual execution outcomes (distinguishing passed, failed, and not-run).
+- Demonstrations must show clean developer workspace preservation.
 
 ---
 
-## 4. Evaluation Rubric Alignment
+## 4. Evaluation Rubric & Compliance Summary
 
-| Evaluation Category | Key Differentiators Showcased |
-| :--- | :--- |
-| **Agent Autonomy & Reasoning** | TrueForge-driven multi-step planning, automated file reading, and contextual tool usage. |
-| **Developer Ergonomics & Control** | Granular hunk-by-hunk review in VS Code; developer retains final veto over every individual code change. |
-| **System Reliability & Safety** | Zero-pollution Git worktrees, SQLite session checkpoints, and immediate cancellation guarantees. |
-| **Transparency & Auditability** | Tamper-evident Patch Passport providing an immutable receipt of agent and test provenance. |
+Because official scoring weights are not published on the public competition page (OD-09), PatchPilot is engineered to satisfy all stated functional expectations equally:
+
+| Area | Competition Expectation | PatchPilot Architectural Response |
+| :--- | :--- | :--- |
+| **Runtime Compliance** | Strict execution on TrueForge. | TrueForge executes the sole agent loop; client uses `@truefoundry/trueforge-sdk`. |
+| **Repository Scale** | Effective navigation of `pallets/flask`. | RepoBrain provides staged context retrieval; relies on TrueForge context compaction. |
+| **Modification Safety** | Safe multi-file changes without polluting user work. | Isolated Git worktrees keep main working tree untouched until explicit review approval. |
+| **Review Granularity** | Hunk-by-hunk diff review. | Custom Webview enables selective accept/reject/re-prompt per individual code hunk. |
+| **Reliability** | Stability under failures and cancellations. | SQLite checkpointing enables recovery; cancellation signals halt execution and prune worktrees. |
+| **Evidence & Traceability** | Verifiable task completion. | Patch Passport manifest bundles intent, diffs, test logs, and review records. |

@@ -1,14 +1,21 @@
 # PatchPilot — Workflow & Lifecycle Architecture
 
+**Product:** PatchPilot  
+**Status:** Proposed Architecture & Technical Design (Milestone 0 Foundation)  
+**Agent Harness:** TrueForge (`@truefoundry/trueforge-sdk`)  
+**Documentation Authority:** Subordinate to [docs/PRD.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/PRD.md)
+
+---
+
 ## 1. End-to-End Execution Lifecycle
 
-The lifecycle of a PatchPilot session moves through explicit stages to guarantee safety, verification, and developer control.
+The lifecycle of a PatchPilot session moves through explicit stages to guarantee safety, verification, and developer control:
 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
     Idle --> RepositoryAnalysis: User Enters Task Prompt
-    RepositoryAnalysis --> ContextRetrieval: RepoBrain AST & ripgrep Scan
+    RepositoryAnalysis --> ContextRetrieval: RepoBrain Search & Symbol Extraction
     ContextRetrieval --> TaskPlanning: Ranked Code Slices to TrueForge
     TaskPlanning --> WorktreeCreation: Structured Plan Generated
     WorktreeCreation --> AutonomousExecution: Isolated Worktree Ready (.patchpilot/worktrees/wt-id)
@@ -27,9 +34,9 @@ stateDiagram-v2
         [*] --> RunTests
         RunTests --> Evaluate: Test Exit Code & Diagnostics
         Evaluate --> SelfHealing: Failures Detected (Attempts < 3)
-        SelfHealing --> RunTests: Fix Applied in Worktree
+        SelfHealing --> RunTests: Proposed Fix Applied in Worktree
         Evaluate --> TestsPassed: All Tests Pass
-        Evaluate --> TestsFailedExhausted: Max Retries Exceeded
+        Evaluate --> TestsFailedExhausted: Max Retries Exceeded (Report Incomplete)
     }
 
     Verification --> HunkReview: Deconstruct Diffs into Hunks
@@ -59,7 +66,7 @@ stateDiagram-v2
     AutonomousExecution --> Cancelled: User Clicks Cancel
     Verification --> Cancelled: User Clicks Cancel
     HunkReview --> Cancelled: User Clicks Cancel
-    Cancelled --> PruneWorktree: Immediate Sandbox Dismantling
+    Cancelled --> PruneWorktree: Clean Worktree & Log State
 ```
 
 ---
@@ -73,46 +80,46 @@ stateDiagram-v2
 
 ### Phase 2: Repository Analysis & Context Retrieval (RepoBrain)
 1. TrueForge requests context related to the user prompt.
-2. RepoBrain coordinates two discovery passes:
-   - **Lexical Discovery:** Invokes `ripgrep` across the repository to locate direct keyword hits, class definitions, and function invocations.
-   - **AST Structural Discovery:** Invokes Tree-sitter on candidate files to extract symbol relationships (e.g., class hierarchies, decorators, imports, call graphs).
-3. Symbols are scored and ranked. High-relevance code slices are packaged into token-bounded context blocks and streamed to TrueForge.
+2. RepoBrain coordinates discovery:
+   - **Lexical Discovery (P0):** Invokes `ripgrep` across the repository to locate direct keyword hits, class definitions, and function invocations.
+   - **AST Symbol Extraction (P1):** Invokes Tree-sitter on candidate files to extract symbol relationships (e.g., class signatures, decorators, imports).
+3. Candidate snippets are ranked. High-relevance code slices are packaged into token-bounded context blocks and streamed to TrueForge.
 
 ### Phase 3: Task Planning
-1. TrueForge digests the context and formulates a structured JSON execution plan.
+1. TrueForge analyzes the context and formulates a structured JSON execution plan.
 2. The plan identifies:
    - Specific target files to modify.
    - Associated test suites to run.
    - Anticipated side effects.
-3. The plan is displayed in the VS Code sidebar for developer transparency.
+3. The plan is displayed in the VS Code sidebar for developer review.
 
 ### Phase 4: Isolated Workspace Provisioning
 1. `WorktreeManager` executes:
    ```bash
    git worktree add -b patchpilot/session-<id> .patchpilot/worktrees/wt-<id> HEAD
    ```
-2. The isolated environment is verified. The developer's active workspace and uncommitted files remain completely untouched.
+2. The isolated environment is verified. The developer's active workspace and uncommitted files remain untouched.
 
 ### Phase 5: Autonomous Multi-File Execution (TrueForge Loop)
 1. TrueForge executes its model-driven loop, reading files from and writing modifications to the worktree directory.
-2. Tool calls (read, write, delete, search) are executed through the Layer 4 tool harness.
+2. Tool calls are executed through the Layer 4 tool harness.
 3. Every step updates the session state in SQLite.
 
-### Phase 6: Self-Healing Verification Loop
-1. Once file edits are complete, PatchPilot executes the verification suite inside the worktree (e.g., `pytest tests/test_routing.py`).
-2. **If all tests pass:** Test outputs, execution time, and coverage metrics are stored in the verification evidence record.
+### Phase 6: Bounded Self-Healing Verification Loop
+1. Once file edits are complete, PatchPilot executes the verification suite inside the worktree (e.g., `pytest tests/`).
+2. **If all tests pass:** Test outputs, execution time, and status are stored in the verification evidence record.
 3. **If tests fail:**
    - Stack traces, error logs, and failure details are captured.
-   - A specialized diagnostic message is fed back to the TrueForge agent loop:
-     > *"Verification failed with exit code 1. Diagnostics: AssertionError at line 42 of test_routing.py. Please inspect the failure and provide self-correcting edits."*
-   - TrueForge analyzes the diagnostic, applies targeted fixes to the worktree, and re-triggers verification.
-   - Self-healing is bounded by a maximum threshold (default: 3 iterations) to prevent infinite loops and runaway token consumption.
+   - A diagnostic message is fed back to the TrueForge agent loop:
+     > *"Verification failed with exit code 1. Diagnostics: AssertionError at line 42. Please inspect the failure and provide self-correcting edits."*
+   - TrueForge attempts a bounded repair cycle (maximum 3 retry iterations).
+   - If tests fail after 3 iterations, execution halts and the failure diagnostics are presented directly to the developer. Unexecuted or failed tests are never reported as passed.
 
 ### Phase 7: Hunk Intelligence & Human-in-the-Loop Review
 1. PatchPilot runs `git diff HEAD` inside the worktree to generate the unified diff across all modified files.
 2. The `HunkEngine` parses the unified diff into discrete, semantically contextualized hunks.
 3. The custom **Hunk Review Webview** opens in VS Code, displaying:
-   - Impacted file path and AST symbol context.
+   - Impacted file path and surrounding code context.
    - Unified side-by-side or inline diff with syntax highlighting.
    - Action buttons:
      - **Accept:** Mark hunk for inclusion.
@@ -153,14 +160,14 @@ flowchart LR
    - Files and symbols modified.
    - Hunk review breakdown (accepted vs rejected).
    - Test execution evidence and logs.
-   - SHA-256 integrity digest.
+   - Manifest schema version and metadata.
 2. The manifest is stored in `.patchpilot/passports/<passport_id>.json` and rendered in the Patch Passport viewer.
 
 ---
 
 ## 3. Cancellation Architecture
 
-Immediate, safe cancellation is an essential requirement of the Forge-a-thon.
+Immediate, safe cancellation is a core requirement of the TrueFoundry Forge-a-thon.
 
 ```mermaid
 sequenceDiagram
@@ -173,25 +180,25 @@ sequenceDiagram
     participant WT as Git Worktree
 
     Dev->>UI: Click "Cancel"
-    UI->>CM: Trigger cancellation
-    CM->>TF: Send AbortSignal (SIGINT)
-    CM->>Sub: Terminate active PID (SIGTERM / SIGKILL)
+    UI->>CM: Trigger cancellation request
+    CM->>TF: Send AbortSignal (Cooperative cancel)
+    CM->>Sub: Terminate active PID (SIGINT / SIGTERM)
     TF-->>CM: Acknowledge execution halt
     CM->>WT: git worktree remove --force
     WT-->>CM: Sandbox pruned
-    CM->>UI: Update status: CANCELLED (zero residue)
+    CM->>UI: Update status: CANCELLED (worktree pruned)
 ```
 
-1. **Immediate Halt:** When the user clicks Cancel, the `CancellationManager` signals the `AbortController`.
-2. **Process Termination:** Any active child process (e.g., long-running `pytest` execution) receives `SIGTERM`, followed by `SIGKILL` if unresponsive within 2 seconds.
-3. **Clean Teardown:** The temporary worktree and its branch are immediately removed, guaranteeing no lingering locks or dirty files.
-4. **Zero Main Workspace Impact:** Because all edits were restricted to the worktree, the developer's working directory is 100% clean and unaffected.
+1. **Cancellation Requested vs Confirmed:** Clicking Cancel transitions the UI to `Cancelling`. Execution is considered cancelled only once TrueForge confirms the halt and subprocesses exit.
+2. **Process Termination:** Active child processes receive `SIGINT`/`SIGTERM`, followed by `SIGKILL` if unresponsive after a short grace period.
+3. **Worktree Teardown:** The temporary worktree and branch are pruned with `git worktree remove --force`.
+4. **Developer Workspace Preservation:** Because edits were confined to the worktree, the developer's working directory remains protected from incomplete edits.
 
 ---
 
 ## 4. Crash Recovery & Resumption Architecture
 
-Network drops, model rate limits, or IDE crashes must never cause lost work or unrecoverable repository states.
+Network drops, model rate limits, or IDE restarts must not corrupt repository states or lose completed reasoning.
 
 ```mermaid
 flowchart TD
@@ -200,7 +207,7 @@ flowchart TD
     AnyActive -- No --> Ready["Ready for New Tasks"]
     AnyActive -- Yes --> VerifyWT["Inspect Stored Worktree Path"]
     
-    VerifyWT --> WTValid{"Worktree Exists & Git Clean?"}
+    VerifyWT --> WTValid{"Worktree Exists & State Consistent?"}
     WTValid -- No --> CleanDB["Clean Stale DB Records -> Ready"]
     WTValid -- Yes --> PromptUser["Prompt Developer:<br/>'Interrupted Session Found. Resume or Discard?'"]
     
@@ -214,5 +221,5 @@ flowchart TD
    - `CHECKPOINT_EDITS_APPLIED`
    - `CHECKPOINT_TESTS_COMPLETED`
    - `CHECKPOINT_REVIEW_IN_PROGRESS`
-2. **Deterministic Resumption:** If VS Code restarts, PatchPilot detects the incomplete session, reads the last checkpoint payload, and offers the developer the option to resume directly from that step.
-3. **Idempotence:** Every operation is designed so re-running from the last checkpoint does not duplicate file changes or create duplicate worktrees.
+2. **Conditional Resumption:** If VS Code restarts, PatchPilot checks the integrity of the worktree and checkpoint payload. If state is clean, the developer is offered a resume path. If state is corrupted or uncertain, PatchPilot requires reconciliation or safe discard.
+3. **Idempotence Objective:** Re-running from a checkpoint is designed to avoid duplicate file edits or duplicate worktree allocations.

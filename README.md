@@ -8,7 +8,7 @@
 [![Target Repo: pallets/flask](https://img.shields.io/badge/Testbed-pallets%2Fflask-lightgrey.svg)](https://github.com/pallets/flask)
 [![Status: Specification & Foundation](https://img.shields.io/badge/Status-Specification%20%26%20Foundation-yellow.svg)](#18-project-status)
 
-**PatchPilot** is a Visual Studio Code-native AI coding agent designed for transparent, controlled, and verifiable software engineering. Powered strictly by the **TrueForge** agent runtime, PatchPilot executes multi-file modifications inside isolated Git worktrees, validates changes through an automated self-healing test loop, gives developers granular hunk-by-hunk review control, and issues a tamper-evident **Patch Passport** verifying the provenance, test logs, and human decisions behind every change.
+**PatchPilot** is a Visual Studio Code-native AI coding agent designed for transparent, controlled, and verifiable software engineering. Powered strictly by the **TrueForge** agent runtime, PatchPilot executes multi-file modifications inside isolated Git worktrees, validates changes through an automated self-healing test loop, gives developers granular hunk-by-hunk review control, and issues a structured **Patch Passport** manifest verifying the provenance, test logs, and human decisions behind every change (with cryptographic hash chaining planned in P1).
 
 Built for the **TrueFoundry Forge-a-thon** at **Techfest, IIT Bombay**, PatchPilot addresses the core reliability and trust gap in generative coding using `pallets/flask` as its primary testbed.
 
@@ -31,7 +31,7 @@ Built for the **TrueFoundry Forge-a-thon** at **Techfest, IIT Bombay**, PatchPil
 - [13. Getting Started](#13-getting-started)
 - [14. Competition Demonstration](#14-competition-demonstration)
 - [15. Testing and Quality Assurance](#15-testing-and-quality-assurance)
-- [16. Documentation](#16-documentation)
+- [16. Documentation Hierarchy & Authority](#16-documentation-hierarchy--authority)
 - [17. Project Status](#17-project-status)
 - [18. Team and Contributions](#18-team-and-contributions)
 - [19. License](#19-license)
@@ -44,7 +44,7 @@ Generative AI coding tools have rapidly transitioned from line-level autocomplet
 
 **PatchPilot** re-engineers the interaction model between developers and coding agents. Designed natively for Visual Studio Code, PatchPilot bridges high-autonomy agent execution with rigorous software quality guarantees:
 
-- **Repository Intelligence (RepoBrain):** High-signal context extraction combining AST symbol dependency graphs with ultra-fast lexical search.
+- **Repository Intelligence (RepoBrain):** High-signal context extraction combining lexical search with AST symbol extraction and localized reference lookup.
 - **Autonomous Multi-File Engineering:** Multi-step planning and cross-module edits orchestrated strictly by the **TrueForge** runtime.
 - **Human-Controlled Hunk Review:** Granular diff deconstruction allowing developers to accept, reject, or re-prompt individual code hunks.
 - **Verification Evidence:** Automated test execution (`pytest`) and linting within an isolated sandbox before changes are surfaced to the user.
@@ -79,8 +79,8 @@ PatchPilot's mission is to make AI-generated code changes **transparent, control
 |   explicitly approved.    before presentation.     over every line.               |
 |                                                                                   |
 |                 AUDIT CONTINUOUSLY         RESUME DETERMINISTICALLY               |
-|                 Tamper-evident Patch       Monotonic checkpoints                  |
-|                 Passport manifest for      ensure crash recovery                  |
+|                 Structured Patch           Monotonic checkpoints                  |
+|                 Passport manifest for      support crash recovery                 |
 |                 every accepted change.     and instant cancellation.              |
 +-----------------------------------------------------------------------------------+
 ```
@@ -95,7 +95,7 @@ PatchPilot documents six core capabilities alongside its signature differentiato
 
 ### 4.1 RepoBrain — Repository Intelligence
 - **Purpose:** Ingests and navigates large-scale codebases (e.g., `pallets/flask`) without exhausting token context windows or introducing noisy distractions.
-- **How It Works:** Pairs Tree-sitter Abstract Syntax Tree (AST) symbol extraction (classes, functions, decorators, imports, call graphs) with `ripgrep` lexical search. Constructs a localized relevance graph that feeds token-compact slices to TrueForge.
+- **How It Works:** Pairs lexical search (`ripgrep`, P0) with Tree-sitter AST symbol extraction (classes, functions, decorators, imports, P1). Bounded context slices feed into TrueForge (full semantic call graph analysis is an aspirational P1 goal).
 - **Why It Matters:** Prevents hallucinated imports and enables accurate context gathering in large repositories.
 - **Implementation Status:** Architecture proposed and documented; implementation pending.
 
@@ -108,7 +108,7 @@ PatchPilot documents six core capabilities alongside its signature differentiato
 ### 4.3 Atomic Multi-File Editing in Git Worktrees
 - **Purpose:** Executes cross-file changes in absolute isolation, protecting developer working trees from corruption.
 - **How It Works:** Provisions an isolated Git worktree at `.patchpilot/worktrees/wt-<session-id>`. All TrueForge file read/write operations execute strictly inside this sandbox.
-- **Why It Matters:** Guarantees zero pollution of uncommitted developer work and allows 100% clean teardown upon cancellation.
+- **Why It Matters:** Designed to isolate edits from uncommitted developer work and enable clean teardown upon cancellation (subject to worktree cleanup verification).
 - **Implementation Status:** Architecture proposed and documented; implementation pending.
 
 ### 4.4 Hunk Intelligence
@@ -119,13 +119,13 @@ PatchPilot documents six core capabilities alongside its signature differentiato
 
 ### 4.5 Self-Healing Verification Loop
 - **Purpose:** Automatically validates generated code against empirical test suites and linters.
-- **How It Works:** Automatically executes `pytest` and linters inside the isolated worktree. If tests fail, stack traces and error messages are fed back to TrueForge to autonomously apply fixes (up to 3 iterations).
+- **How It Works:** Automatically executes `pytest` and linters inside the isolated worktree. If tests fail, stack traces and error messages are fed back to TrueForge to attempt a bounded self-healing cycle (up to 3 iterations; non-guaranteed heuristic repair).
 - **Why It Matters:** Catches regressions before human review, saving developers from debugging syntax errors or broken tests.
 - **Implementation Status:** Architecture proposed and documented; implementation pending.
 
 ### 4.6 Crash Recovery Engine
 - **Purpose:** Ensures agent sessions survive network drops, model timeouts, and IDE restarts.
-- **How It Works:** Employs an embedded SQLite database (`.patchpilot/session.db`) to record monotonic checkpoints. On startup, PatchPilot detects interrupted sessions and resumes from the last valid checkpoint.
+- **How It Works:** Employs an embedded SQLite database (`.patchpilot/session.db`) to record monotonic checkpoints. On startup, PatchPilot inspects SQLite for interrupted sessions, validates worktree integrity, and offers an idempotent resume path where state is consistent.
 - **Why It Matters:** Eliminates lost reasoning and duplicate token costs caused by unexpected failures.
 - **Implementation Status:** Architecture proposed and documented; implementation pending.
 
@@ -139,7 +139,7 @@ The **Patch Passport** is PatchPilot's signature product innovation. It serves a
 
 ```mermaid
 graph TD
-    Passport["Patch Passport Manifest<br/>(Cryptographically Hashed Record)"]
+    Passport["Patch Passport Manifest<br/>(Structured Evidence Ledger)"]
     
     Prompt["Original User Intent<br/>- Raw natural language prompt<br/>- Task context & constraints"]
     Plan["Execution Plan<br/>- Sub-goals & target files<br/>- TrueForge reasoning trace"]
@@ -299,7 +299,7 @@ sequenceDiagram
     VH->>WT: Execute pytest / linter
     alt Tests Fail
         VH-->>TF: Return stderr & Failure Stack Trace
-        TF->>WT: Self-Healing: Apply Bug Fixes
+        TF->>WT: Bounded Self-Healing Attempt
         TF->>VH: Re-run Verification Suite
     end
     VH-->>Ext: Verification Success (Evidence Captured)
@@ -315,8 +315,8 @@ sequenceDiagram
 ```
 
 ### Failure Recovery & Cancellation Paths
-- **Immediate Cancellation:** Developer clicking "Cancel" dispatches `AbortSignal` to TrueForge SDK, sends `SIGINT` to running child processes (`pytest`), prunes the temporary worktree, and resets session state with zero residue.
-- **Crash Recovery:** If IDE restarts, PatchPilot queries SQLite, verifies the existing worktree, and prompts the developer to resume from the last valid checkpoint.
+- **Immediate Cancellation:** Developer clicking "Cancel" dispatches `AbortSignal` to TrueForge SDK, sends `SIGINT`/`SIGTERM` to running child processes (e.g. `pytest`), prunes the temporary worktree, and transitions session state to `CANCELLED` without polluting the active developer branch.
+- **Crash Recovery:** If IDE restarts, PatchPilot queries SQLite, validates the state of any existing worktrees, and prompts the developer to resume from the last valid checkpoint if the workspace state is consistent.
 
 For detailed sequence diagrams and state machines, see [docs/WORKFLOWS.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/WORKFLOWS.md).
 
@@ -426,9 +426,9 @@ PatchPilot is engineered specifically to address the evaluation criteria of the 
 | **Large Codebase Understanding** | Efficient navigation of large repos without token blowup. | RepoBrain pairs Tree-sitter AST symbol graphs with `ripgrep` lexical index to feed compact context slices to TrueForge. |
 | **Autonomous Multi-File Editing** | Coordinated edits across multiple files. | Isolated Git worktrees enable atomic, transactional multi-file modifications. |
 | **Hunk-by-Hunk Review** | Safe diff inspection before applying changes. | Custom Webview allows developers to inspect, accept, reject, or re-prompt individual hunks. |
-| **Model Failure Recovery** | Robust handling of timeouts and failures. | SQLite checkpoint store enables deterministic session resumption; self-healing loop fixes broken tests. |
-| **Immediate Cancellation** | Instant halt of running agent tasks. | AbortController propagation stops TrueForge loops and kills running subprocesses instantly. |
-| **Demonstration Repository** | Evaluated on `pallets/flask`. | 3 official task categories (Refactoring, Bug Fixing, Typing/Docs) validated against Flask's test suite. |
+| **Model Failure Recovery** | Robust handling of timeouts and failures. | SQLite checkpoint store enables idempotent resumption for resumable sessions; bounded self-healing loop (up to 3 retries) attempts automated test repair. |
+| **Immediate Cancellation** | Instant halt of running agent tasks. | AbortController propagation signals TrueForge runtime to halt, terminates active subprocesses via SIGINT/SIGTERM, and prunes temporary worktree. |
+| **Demonstration Repository** | Evaluated on `pallets/flask`. | Official task demonstration targets Tasks A, B, and C on pallets/flask (exact prompts awaiting official competition release; generic rehearsal fixtures utilized for preliminary validation). |
 
 For the complete compliance matrix and judging alignment, see [docs/COMPETITION_COMPLIANCE.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/COMPETITION_COMPLIANCE.md).
 
@@ -511,12 +511,12 @@ The Forge-a-thon Round 1 video submission requires a strict 4-minute technical w
 | Timestamp | Segment Title | Demonstrated Actions & Capabilities |
 | :--- | :--- | :--- |
 | **0:00 – 0:45** | **Architecture & Workspace Cleanliness** | Introduce PatchPilot and its TrueForge-powered architecture. Show `pallets/flask` in VS Code with existing uncommitted developer files to demonstrate workspace cleanliness. |
-| **0:45 – 1:45** | **Task 1 Execution & Worktree Isolation** | Dispatch Task 1 to TrueForge. RepoBrain retrieves AST symbols and TrueForge formulates plan. Show Git worktree creation; prove developer branch is untouched. |
-| **1:45 – 2:45** | **Verification Loop & Hunk Intelligence** | Automated test runner catches synthetic failure; TrueForge self-heals the code. Open Hunk Review UI: selectively accept Hunk 1 and reject Hunk 2. |
-| **2:45 – 3:30** | **Tasks 2 & 3 & Immediate Cancellation** | Execute Task 2 bug fix. Trigger Task 3 and click Cancel; demonstrate instant SIGINT teardown, worktree pruning, and zero residual pollution. |
+| **0:45 – 1:45** | **Rehearsal Task A: Worktree Isolation** | Dispatch rehearsal refactoring goal (provisional task target) to TrueForge. RepoBrain retrieves AST symbols and TrueForge formulates plan. Show Git worktree creation; prove developer branch is untouched. |
+| **1:45 – 2:45** | **Verification Loop & Hunk Intelligence** | Automated test runner catches synthetic test regression; TrueForge attempts bounded self-healing. Open Hunk Review UI: selectively accept Hunk 1 and reject Hunk 2. |
+| **2:45 – 3:30** | **Rehearsal Task B & C: Cancellation & Bug Fix** | Execute rehearsal bug fix. Trigger next task and click Cancel; demonstrate cooperative cancellation, SIGINT teardown of child processes, worktree pruning, and workspace protection. |
 | **3:30 – 4:00** | **Patch Passport Audit & Conclusion** | Open generated Patch Passport. Review verifiable audit trail: user intent, diffs, test logs, review decisions, and TrueForge token telemetry. |
 
-*Note: All demonstration scenarios will be executed against real test suites without fabricated completion metrics.*
+*Note: The official prompts and evaluation rubrics for Tasks A, B, and C have not been released by competition organizers. The demonstration scenario descriptions above represent internal rehearsal targets designed against pallets/flask and will be updated immediately upon release of official task specifications (OD-01, OD-02, OD-03).*
 
 ---
 
@@ -531,15 +531,16 @@ PatchPilot will employ a multi-layered testing strategy:
 
 ---
 
-## 16. Documentation
+## 16. Documentation Hierarchy & Authority
 
-The complete documentation foundation for PatchPilot is structured across the following specifications:
+PatchPilot documentation is organized in a strict hierarchy of authority. In the event of discrepancy or conflict, specifications higher in the hierarchy supersede lower documents:
 
-- **[docs/PRD.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/PRD.md):** The Product Requirements Document (PRD v0.1.0) and Initial Technical Design.
-- **[PATCHPILOT_INITIAL_ENGINEERING_DOCUMENTATION.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/PATCHPILOT_INITIAL_ENGINEERING_DOCUMENTATION.md):** The primary engineering requirements, problem analysis, and foundational specification.
-- **[docs/ARCHITECTURE.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/ARCHITECTURE.md):** In-depth technical architecture of the 5 layers, RepoBrain design, TrueForge integration contract, and SQLite persistence schema.
-- **[docs/WORKFLOWS.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/WORKFLOWS.md):** Complete lifecycle sequence diagrams, hunk review state machines, self-healing verification logic, and cancellation/crash recovery replay mechanisms.
-- **[docs/COMPETITION_COMPLIANCE.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/COMPETITION_COMPLIANCE.md):** Forge-a-thon requirements traceability matrix, 4-minute demonstration protocol, and judging criteria mapping.
+1. **[docs/PRD.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/PRD.md):** Primary product requirements, scope boundaries, core user journeys, and acceptance criteria (PRD v0.1.0).
+2. **[docs/ARCHITECTURE.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/ARCHITECTURE.md):** Technical architecture specification, 5-layer system design, component contracts, and SQLite schema.
+3. **[docs/WORKFLOWS.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/WORKFLOWS.md):** Execution, verification, hunk review, cancellation, and crash recovery workflows.
+4. **[docs/COMPETITION_COMPLIANCE.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/COMPETITION_COMPLIANCE.md):** Forge-a-thon competition compliance matrix, requirement classification (Categories A–D), open decisions register (OD-01 to OD-10), and demo protocol.
+5. **[README.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/README.md):** Public project overview, high-level architecture, setup guide, and project status.
+6. **[PATCHPILOT_INITIAL_ENGINEERING_DOCUMENTATION.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/PATCHPILOT_INITIAL_ENGINEERING_DOCUMENTATION.md):** Root initial engineering baseline document preserved for foundational and historical context.
 
 ---
 

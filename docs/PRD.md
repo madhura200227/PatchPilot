@@ -1,10 +1,14 @@
 # PATCHPILOT
 
-## Initial Product Requirements, System Architecture & Engineering Plan
+## Product Requirements Document (PRD v0.1.0) & Initial Technical Design
+
+> **DOCUMENTATION AUTHORITY LEVEL: 1 (PRIMARY PRODUCT REQUIREMENTS)**  
+> This document (`docs/PRD.md`) is the primary source of truth for PatchPilot product requirements, user journeys, functional specifications, and MVP acceptance criteria.  
+> Hierarchy of authority: (1) `docs/PRD.md` > (2) [docs/ARCHITECTURE.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/ARCHITECTURE.md) > (3) [docs/WORKFLOWS.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/WORKFLOWS.md) > (4) [docs/COMPETITION_COMPLIANCE.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/COMPETITION_COMPLIANCE.md) > (5) [README.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/README.md) > (6) [PATCHPILOT_INITIAL_ENGINEERING_DOCUMENTATION.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/PATCHPILOT_INITIAL_ENGINEERING_DOCUMENTATION.md).
 
 **Document type:** Product Requirements Document + Initial Technical Design  
 **Version:** 0.1.0  
-**Status:** Initial architecture --- pending official task specifications and team review  
+**Status:** Authoritative Product Requirements --- frozen pending official competition task release and team review  
 **Competition:** TrueFoundry Forge-a-thon, Techfest, IIT Bombay  
 **Prepared:** 17 November 2026  
 **Target:** VS Code extension-native AI coding agent powered by TrueForge  

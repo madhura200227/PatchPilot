@@ -2,9 +2,18 @@
 
 ## Initial Product Requirements, System Architecture & Engineering Plan
 
-**Document type:** Product Requirements Document + Initial Technical Design  
+> **DOCUMENTATION AUTHORITY LEVEL: 6 (INITIAL COMPREHENSIVE BASELINE)**  
+> This root document preserves the initial comprehensive engineering specification, baseline requirements, and foundational design analysis prepared for PatchPilot.  
+> For active modular specifications governed by the Documentation Authority Hierarchy, refer to:  
+> 1. [docs/PRD.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/PRD.md) — Primary product requirements & acceptance criteria (Level 1, Authoritative)  
+> 2. [docs/ARCHITECTURE.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/ARCHITECTURE.md) — Detailed technical architecture & component contracts (Level 2)  
+> 3. [docs/WORKFLOWS.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/WORKFLOWS.md) — Execution lifecycles, recovery & cancellation state machines (Level 3)  
+> 4. [docs/COMPETITION_COMPLIANCE.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/COMPETITION_COMPLIANCE.md) — Competition matrix, open decisions register & demo protocol (Level 4)  
+> 5. [README.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/README.md) — Public project overview & developer documentation portal (Level 5)  
+
+**Document type:** Foundational Engineering Specification & Historical Baseline  
 **Version:** 0.1.0  
-**Status:** Initial architecture --- pending official task specifications and team review  
+**Status:** Baseline Specification --- frozen for initial audit  
 **Competition:** TrueFoundry Forge-a-thon, Techfest, IIT Bombay  
 **Prepared:** 17 November 2026  
 **Target:** VS Code extension-native AI coding agent powered by TrueForge  
