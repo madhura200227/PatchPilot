@@ -488,14 +488,15 @@ gantt
 git clone https://github.com/madhura200227/PatchPilot.git
 cd PatchPilot
 
-# 2. Install extension and build dependencies (Pending package.json)
+# 2. Install extension dependencies
 npm install
 
-# 3. Compile TypeScript sources (Pending implementation)
-npm run build
+# 3. Compile TypeScript sources & bundle extension
+npm run compile
 
-# 4. Run unit and integration tests (Pending implementation)
-npm test
+# 4. Run unit and integration tests
+npm run test:unit
+npm run test:integration
 
 # 5. Launch VS Code Extension Development Host
 # Press F5 in VS Code or run:
@@ -522,12 +523,11 @@ The Forge-a-thon Round 1 video submission requires a strict 4-minute technical w
 
 ## 15. Testing and Quality Assurance
 
-PatchPilot will employ a multi-layered testing strategy:
+PatchPilot employs a multi-layered testing strategy:
 
-1. **Unit Testing (Vitest):** Tests standalone algorithmic components including diff parsers, hunk chunking logic, AST symbol extractors, and SQLite checkpoint stores.
-2. **Integration Testing:** Tests Git worktree creation, isolated file modification, selective patch staging, and cancellation signal propagation.
-3. **TrueForge Harness Mocking:** Tests TrueForge SDK client behavior using mock server endpoints simulating normal completions, streaming tokens, test failures, and network timeouts.
-4. **Flask Benchmark Suite (`pallets/flask`):** Rigorous validation against real `pallets/flask` test suites, verifying that generated patches pass existing and newly added regression tests.
+1. **Unit Testing (Mocha):** Tests client instantiation, configuration reading, SecretStorage token management, state machine transitions, event stream classification, delta aggregation & deduplication, and cancellation managers (35 passing unit tests).
+2. **Integration Testing (Live TrueForge):** Tests real HTTP/SSE interaction against the live local TrueForge standalone daemon (health check, session CRUD, turn streaming, server-side cancellation).
+3. **Flask Benchmark Suite (`pallets/flask`):** Rigorous validation against real `pallets/flask` test suites (Milestone 1+).
 
 ---
 
@@ -538,9 +538,10 @@ PatchPilot documentation is organized in a strict hierarchy of authority. In the
 1. **[docs/PRD.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/PRD.md):** Primary product requirements, scope boundaries, core user journeys, and acceptance criteria (PRD v0.1.0).
 2. **[docs/ARCHITECTURE.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/ARCHITECTURE.md):** Technical architecture specification, 5-layer system design, component contracts, and SQLite schema.
 3. **[docs/WORKFLOWS.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/WORKFLOWS.md):** Execution, verification, hunk review, cancellation, and crash recovery workflows.
-4. **[docs/COMPETITION_COMPLIANCE.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/COMPETITION_COMPLIANCE.md):** Forge-a-thon competition compliance matrix, requirement classification (Categories A–D), open decisions register (OD-01 to OD-10), and demo protocol.
-5. **[README.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/README.md):** Public project overview, high-level architecture, setup guide, and project status.
-6. **[PATCHPILOT_INITIAL_ENGINEERING_DOCUMENTATION.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/PATCHPILOT_INITIAL_ENGINEERING_DOCUMENTATION.md):** Root initial engineering baseline document preserved for foundational and historical context.
+4. **[docs/MILESTONE_0.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/MILESTONE_0.md):** Milestone 0 extension skeleton and TrueForge bridge verification report.
+5. **[docs/COMPETITION_COMPLIANCE.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/COMPETITION_COMPLIANCE.md):** Forge-a-thon competition compliance matrix, requirement classification (Categories A–D), open decisions register (OD-01 to OD-10), and demo protocol.
+6. **[README.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/README.md):** Public project overview, high-level architecture, setup guide, and project status.
+7. **[PATCHPILOT_INITIAL_ENGINEERING_DOCUMENTATION.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/PATCHPILOT_INITIAL_ENGINEERING_DOCUMENTATION.md):** Root initial engineering baseline document preserved for foundational and historical context.
 
 ---
 
@@ -552,14 +553,14 @@ The current operational state of PatchPilot is explicitly tracked below:
 | :--- | :--- | :--- |
 | **Initial Engineering Documentation** | Available | Comprehensive specification completed. |
 | **Product Architecture** | Proposed & Documented | Detailed in README and `docs/ARCHITECTURE.md`. |
-| **VS Code Extension Skeleton** | Pending Implementation | Milestone 0 target. |
-| **TrueForge SDK Integration** | Pending Verification | Client architecture designed; integration pending. |
-| **RepoBrain Intelligence** | Pending Implementation | Lexical & AST pipeline documented. |
-| **Git Worktree Isolation** | Pending Implementation | Isolation protocol specified. |
-| **Hunk Review Webview** | Pending Implementation | Webview UI and staging engine designed. |
-| **Self-Healing Verification Loop**| Pending Implementation | Verification harness and retry loop designed. |
-| **Patch Passport Engine** | Pending Implementation | JSON schema and integrity hash design documented. |
-| **Crash Recovery & Cancellation**| Pending Implementation | SQLite checkpointing schema documented. |
+| **VS Code Extension Skeleton** | **Implemented & Verified** | Full extension skeleton, command registration, state machine, output channel ([docs/MILESTONE_0.md](file:///e:/MADHURA/PROJECTS%20madhura/PatchPilot/docs/MILESTONE_0.md)). |
+| **TrueForge SDK Integration** | **Implemented & Verified** | `@truefoundry/trueforge-sdk@0.185.0` bridge, session lifecycle, SSE streaming, cancellation. |
+| **RepoBrain Intelligence** | Pending Implementation | Lexical & AST pipeline documented; Milestone 1 target. |
+| **Git Worktree Isolation** | Pending Implementation | Isolation protocol specified; Milestone 1 target. |
+| **Hunk Review Webview** | Pending Implementation | Webview UI and staging engine designed; Milestone 2 target. |
+| **Self-Healing Verification Loop**| Pending Implementation | Verification harness and retry loop designed; Milestone 2 target. |
+| **Patch Passport Engine** | Pending Implementation | JSON schema and integrity hash design documented; Milestone 3 target. |
+| **Crash Recovery & Cancellation**| **Partial (M0 Baseline)** | In-memory recovery & multi-layer cancellation verified; SQLite store in Milestone 3. |
 | **Official Task Demonstrations** | Pending | Benchmark protocols defined; execution pending. |
 
 ---
