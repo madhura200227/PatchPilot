@@ -182,6 +182,9 @@ export async function runWorkspaceTests(
     mustExist: true,
   });
 
+  const cleanEnv = { ...process.env };
+  delete (cleanEnv as Record<string, string | undefined>)["NODE_TEST_CONTEXT"];
+
   const startTime = Date.now();
   try {
     const { stdout, stderr } = await execFileAsync("node", ["--test", safeTestFile], {
@@ -190,6 +193,7 @@ export async function runWorkspaceTests(
       maxBuffer: 64 * 1024, // 64KB output limit
       windowsHide: true,
       shell: false, // Critical: prevent shell execution & command injection
+      env: cleanEnv,
     });
 
     const durationMs = Date.now() - startTime;
