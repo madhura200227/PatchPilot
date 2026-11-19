@@ -76,7 +76,7 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./ && esbuild src/extension.ts --bundle --platform=node --external:vscode --outfile=dist/extension.js",
+    "compile": "tsc -p ./ && esbuild src/extension.ts --bundle --platform=node --external:vscode --outfile=dist/extension.js && esbuild src/workspace/mcpServerEntry.ts --bundle --platform=node --outfile=dist/mcpServer.js",
     "watch": "tsc -watch -p ./",
     "lint": "tsc --noEmit",
     "bundle:test": "esbuild src/test/unit/*.test.ts --bundle --platform=node --external:vscode --external:mocha --outdir=dist/test/unit && esbuild src/test/integration/*.test.ts --bundle --platform=node --external:vscode --external:mocha --outdir=dist/test/integration",
