@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { sanitizeSecretText } from "../security/secretFilter";
 
 export interface ILogger {
   info(message: string): void;
@@ -15,11 +16,7 @@ export interface ILogger {
  * Sanitizes log output to ensure access tokens and sensitive credentials are never written to logs.
  */
 export function sanitizeLog(text: string): string {
-  return text
-    .replace(/(?:Bearer\s+)[A-Za-z0-9_\-\.]{8,}/gi, "Bearer [REDACTED]")
-    .replace(/(?:sk-[A-Za-z0-9_\-]{8,})/gi, "sk-[REDACTED]")
-    .replace(/(?:api[_-]?key["':\s=]+)[A-Za-z0-9_\-\.]{8,}/gi, "apiKey: [REDACTED]")
-    .replace(/(?:token["':\s=]+)[A-Za-z0-9_\-\.]{8,}/gi, "token: [REDACTED]");
+  return sanitizeSecretText(text);
 }
 
 export class PatchPilotLogger implements ILogger {
