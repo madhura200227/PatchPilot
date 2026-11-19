@@ -228,7 +228,13 @@ export function searchAndRankWorkspace(
 
     const content = buf.toString("utf8");
     const lowerContent = content.toLowerCase();
-    const lowerPath = rel.toLowerCase();
+    const pathTokens = new Set(
+      rel
+        .toLowerCase()
+        .replace(/([a-z])([A-Z])/g, "$1 $2")
+        .split(/[^a-z0-9]+/)
+        .filter((t) => t.length >= 2)
+    );
 
     const termFreqs = new Map<string, number>();
     const pathMatches: string[] = [];
@@ -239,7 +245,7 @@ export function searchAndRankWorkspace(
         termFreqs.set(term, tf);
         docFreq.set(term, (docFreq.get(term) ?? 0) + 1);
       }
-      if (lowerPath.includes(term)) {
+      if (pathTokens.has(term) || (term.length >= 4 && Array.from(pathTokens).some((pt) => pt.startsWith(term)))) {
         pathMatches.push(term);
       }
     }
@@ -282,10 +288,13 @@ export function searchAndRankWorkspace(
       bm25 += idf * ((tf * (k1 + 1)) / denom);
     }
 
-    // Path & multi-term coverage boosts
-    const pathBoost = doc.pathMatches.length * 2.5;
+    // Path & multi-term coverage boosts (lightly de-boost historical changelogs)
+    const baseLower = path.basename(doc.relativePath).toLowerCase();
+    const changelogPenalty =
+      baseLower.startsWith("changes") || baseLower.startsWith("changelog") ? 0.5 : 1.0;
+    const pathBoost = doc.pathMatches.length * 3.5;
     const coverageBoost = (matchedTerms.size / terms.length) * 3.0;
-    const totalScore = Number((bm25 + pathBoost + coverageBoost).toFixed(2));
+    const totalScore = Number(((bm25 + pathBoost + coverageBoost) * changelogPenalty).toFixed(2));
 
     const snippets = extractMatchingSnippets(
       doc.content,

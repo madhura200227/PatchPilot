@@ -85,3 +85,13 @@ With the controlled workspace access boundary and TrueForge MCP integration prov
 - **RepoBrain Indexing:** Safe to begin AST / Tree-sitter indexing without risk of workspace corruption.
 - **Git Worktree Manager:** Implement the production worktree supervisor creating isolated worktree branches from `HEAD`.
 - **Patch Passport & Hunk Review:** Enforce human review gates before applying any worktree patch to the developer's primary working branch.
+
+---
+
+## 7. Addendum — Promotion to Production Extension MVP (Prompt 007)
+
+*Updated for `feature/forgeathon-mvp` while preserving the Prompt 005 historical evidence above:*
+
+- **Production Integration:** The local authenticated MCP server pattern validated in this spike has been promoted into the production VS Code extension under `src/workspace/` (`mcpServerCore.ts`, `mcpServerEntry.ts`, `WorkspaceProcessManager.ts`, `WorkspaceMcpAdapter.ts`, `proposalStore.ts`, `executionOverlay.ts`, `patchEngine.ts`, `hunkReview.ts`, `undoManager.ts`) and `src/security/` (`pathGuard.ts`, `secretFilter.ts`, `commandPolicy.ts`), bundled as `dist/mcpServer.js`.
+- **Security Hardening Applied:** Closed the spike's blanket dotfile bypass (`ALLOWED_DOTFILES` allowlist), replaced broad test-file execution with strict per-executable argument policies in `commandPolicy.ts`, replaced direct workspace writes with proposal-only `propose_edit` + disposable execution overlays, and added per-session Streamable HTTP transports.
+- **Verification Status:** Out-of-process MCP startup inside a real VS Code Extension Development Host (`1.146.0`), TrueForge v0.185.1 connector registration & 8-tool discovery, agent context-engineering persistence (`preload: false`, `compaction`, `largeToolResponse`, literal tool approvals), hunk review/apply/undo, and Task C resilience are verified. Live model-backed end-to-end execution remains `BLOCKED` until a valid upstream model provider credential is configured in TrueForge; accordingly, Architecture A remains a **verified infrastructure candidate pending live provider-backed agent proof**.
