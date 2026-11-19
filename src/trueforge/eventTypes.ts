@@ -1,33 +1,71 @@
-import { TrueForge, TrueForgeApi, isEventDelta, mergeEventDelta } from "@truefoundry/trueforge-sdk";
+import { TrueForgeApi, isEventDelta, mergeEventDelta } from "@truefoundry/trueforge-sdk";
 
 export type KnownEventType =
   | "turn.created"
   | "model.message"
   | "model.message.delta"
-  | "turn.update"
+  | "tool.response"
   | "tool.approval_required"
   | "tool.response_required"
   | "mcp.auth_required"
+  | "mcp.initialize"
+  | "thread.context_compaction.started"
+  | "thread.context_compaction.finished"
+  | "turn.update"
   | "turn.done"
   | "unknown";
 
 export type TerminalTurnStatus = "done" | "cancelled" | "error";
 
+export interface ExtractedToolCall {
+  id: string;
+  name: string;
+  serverName?: string;
+  argumentsRaw: string;
+  parsedArguments?: Record<string, unknown>;
+}
+
+export interface ExtractedApprovalRef {
+  toolCallId: string;
+  sourceEventId: string;
+}
+
 export interface ClassifiedEvent {
   id?: string;
   type: KnownEventType | string;
+  threadId?: string;
   turnId?: string;
   deltaText?: string;
+  reasoningDelta?: string;
   messageText?: string;
+  toolCalls?: ExtractedToolCall[];
+  approvalRefs?: ExtractedApprovalRef[];
+  toolResponseCallId?: string;
+  toolResponseContent?: string;
+  liveTurnStatus?: string;
   terminalStatus?: TerminalTurnStatus;
   terminalReason?: string;
+  modelName?: string;
+  /** Preserved for Milestone 0 compatibility checks */
   isUnsupportedInM0: boolean;
   unsupportedReason?: string;
   rawEvent: TrueForgeApi.TurnStreamingEvent | Record<string, unknown>;
 }
 
+function tryParseJsonObject(raw: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Non-JSON or partial arguments
+  }
+  return undefined;
+}
+
 /**
- * Classifies a TrueForge SSE streaming event into PatchPilot's internal normalized representation.
+ * Classifies a TrueForge SSE streaming event into PatchPilot's normalized event structure.
  */
 export function classifyTurnEvent(
   event: TrueForgeApi.TurnStreamingEvent | Record<string, unknown>
@@ -35,10 +73,12 @@ export function classifyTurnEvent(
   const raw = event as Record<string, unknown>;
   const eventType = typeof raw.type === "string" ? raw.type : "unknown";
   const eventId = typeof raw.id === "string" ? raw.id : undefined;
+  const threadId = typeof raw.threadId === "string" ? raw.threadId : undefined;
 
   const result: ClassifiedEvent = {
     id: eventId,
     type: eventType,
+    threadId,
     isUnsupportedInM0: false,
     rawEvent: event as TrueForgeApi.TurnStreamingEvent,
   };
@@ -55,15 +95,20 @@ export function classifyTurnEvent(
       if (typeof delta.content === "string") {
         result.deltaText = delta.content;
       }
+      if (typeof delta.reasoningContent === "string") {
+        result.reasoningDelta = delta.reasoningContent;
+      }
       break;
     }
 
     case "model.message": {
       const msg = event as TrueForgeApi.ModelMessageEvent;
+      if (msg.model && typeof msg.model.name === "string") {
+        result.modelName = msg.model.name;
+      }
       if (typeof msg.content === "string") {
         result.messageText = msg.content;
       } else if (Array.isArray(msg.content)) {
-        // Content parts
         const parts: string[] = [];
         for (const p of msg.content) {
           if (p && typeof p === "object" && "text" in p && typeof (p as { text: unknown }).text === "string") {
@@ -72,11 +117,57 @@ export function classifyTurnEvent(
         }
         result.messageText = parts.join("");
       }
+
+      if (Array.isArray(msg.toolCalls) && msg.toolCalls.length > 0) {
+        result.toolCalls = msg.toolCalls.map((tc) => {
+          const fnName = tc.function?.name || "unknown_tool";
+          const argsRaw = typeof tc.function?.arguments === "string" ? tc.function.arguments : "{}";
+          const info = tc.toolInfo as { type?: string; name?: string; serverName?: string } | undefined;
+          return {
+            id: tc.id,
+            name: info?.name || fnName,
+            serverName: info?.serverName,
+            argumentsRaw: argsRaw,
+            parsedArguments: tryParseJsonObject(argsRaw),
+          };
+        });
+      }
+      break;
+    }
+
+    case "tool.response": {
+      const resp = event as TrueForgeApi.ToolResponseEvent;
+      result.toolResponseCallId = resp.toolCallId;
+      result.toolResponseContent = resp.content;
+      break;
+    }
+
+    case "tool.approval_required": {
+      const appr = event as TrueForgeApi.ToolApprovalRequiredEvent;
+      result.isUnsupportedInM0 = true;
+      result.unsupportedReason =
+        "Received 'tool.approval_required' event. Interactive approval and tool handling is not supported in Milestone 0.";
+      if (Array.isArray(appr.toolCalls)) {
+        result.approvalRefs = appr.toolCalls.map((ref) => ({
+          toolCallId: ref.id,
+          sourceEventId: ref.sourceEventId,
+        }));
+      }
+      break;
+    }
+
+    case "tool.response_required":
+    case "mcp.auth_required": {
+      result.isUnsupportedInM0 = true;
+      result.unsupportedReason = `Received '${eventType}' event. Interactive approval and tool handling is not supported in Milestone 0.`;
       break;
     }
 
     case "turn.update": {
-      // General turn status update
+      const upd = event as TrueForgeApi.TurnUpdateEvent;
+      if (upd.state && typeof upd.state.status === "string") {
+        result.liveTurnStatus = upd.state.status;
+      }
       break;
     }
 
@@ -99,16 +190,13 @@ export function classifyTurnEvent(
       break;
     }
 
-    case "tool.approval_required":
-    case "tool.response_required":
-    case "mcp.auth_required": {
-      result.isUnsupportedInM0 = true;
-      result.unsupportedReason = `Received '${eventType}' event. Interactive approval and tool handling is not supported in Milestone 0.`;
+    case "thread.context_compaction.started":
+    case "thread.context_compaction.finished":
+    case "mcp.initialize": {
       break;
     }
 
     default: {
-      // Check for other action_required or approval types
       if (eventType.includes("approval") || eventType.includes("response_required")) {
         result.isUnsupportedInM0 = true;
         result.unsupportedReason = `Received interactive event '${eventType}'. Unsupported in Milestone 0.`;
