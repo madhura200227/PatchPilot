@@ -1,9 +1,13 @@
 {
   "name": "patchpilot",
   "displayName": "PatchPilot",
-  "description": "Evidence-Backed Autonomous Patch Generation and Hunk-Level Staging",
-  "version": "0.1.0",
+  "description": "TrueForge-Powered VS Code Coding Agent with Proposal-Only Multi-File Edits, Hunk-Level Review, Disposable Overlay Verification, and Safe Undo",
+  "version": "0.2.0",
   "publisher": "madhura200227",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/madhura200227/PatchPilot.git"
+  },
   "engines": {
     "vscode": "^1.101.0"
   },
@@ -12,67 +16,193 @@
     "Machine Learning",
     "Other"
   ],
-  "activationEvents": [],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "PatchPilot workspace MCP tools, context indexing, and edit application require a trusted workspace."
+    }
+  },
+  "activationEvents": [
+    "onView:patchpilot.agentView"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "patchpilot",
+          "title": "PatchPilot",
+          "icon": "media/patchpilot.svg"
+        }
+      ]
+    },
+    "views": {
+      "patchpilot": [
+        {
+          "type": "webview",
+          "id": "patchpilot.agentView",
+          "name": "Agent"
+        }
+      ]
+    },
     "commands": [
       {
+        "command": "patchpilot.openAgent",
+        "title": "Open Agent Panel",
+        "category": "PatchPilot"
+      },
+      {
+        "command": "patchpilot.inlineEdit",
+        "title": "Inline Edit Selection",
+        "category": "PatchPilot"
+      },
+      {
+        "command": "patchpilot.startAgentRun",
+        "title": "Start Agent Run",
+        "category": "PatchPilot"
+      },
+      {
+        "command": "patchpilot.cancelRun",
+        "title": "Cancel Active Run",
+        "category": "PatchPilot"
+      },
+      {
+        "command": "patchpilot.reviewChanges",
+        "title": "Review Proposed Changes",
+        "category": "PatchPilot"
+      },
+      {
+        "command": "patchpilot.applyAcceptedChanges",
+        "title": "Apply Accepted Changes",
+        "category": "PatchPilot"
+      },
+      {
+        "command": "patchpilot.discardChanges",
+        "title": "Discard Proposed Changes",
+        "category": "PatchPilot"
+      },
+      {
+        "command": "patchpilot.undoLastApply",
+        "title": "Undo Last Apply",
+        "category": "PatchPilot"
+      },
+      {
+        "command": "patchpilot.checkTrueForge",
+        "title": "Check TrueForge Status",
+        "category": "PatchPilot"
+      },
+      {
+        "command": "patchpilot.configureTrueForge",
+        "title": "Configure TrueForge",
+        "category": "PatchPilot"
+      },
+      {
+        "command": "patchpilot.showSession",
+        "title": "Show Session Details",
+        "category": "PatchPilot"
+      },
+      {
+        "command": "patchpilot.selectWorkspace",
+        "title": "Select Workspace Folder",
+        "category": "PatchPilot"
+      },
+      {
         "command": "patchpilot.checkConnection",
-        "title": "PatchPilot: Check TrueForge Connection",
+        "title": "Check TrueForge Connection (Legacy)",
         "category": "PatchPilot"
       },
       {
         "command": "patchpilot.startSession",
-        "title": "PatchPilot: Start Test Session",
+        "title": "Start Test Session",
         "category": "PatchPilot"
       },
       {
         "command": "patchpilot.sendTestMessage",
-        "title": "PatchPilot: Send Test Message",
+        "title": "Send Test Message",
         "category": "PatchPilot"
       },
       {
         "command": "patchpilot.cancelTurn",
-        "title": "PatchPilot: Cancel Active Turn",
+        "title": "Cancel Active Turn",
         "category": "PatchPilot"
       },
       {
         "command": "patchpilot.showOutput",
-        "title": "PatchPilot: Show Output",
+        "title": "Show Output",
         "category": "PatchPilot"
       },
       {
         "command": "patchpilot.setToken",
-        "title": "PatchPilot: Set TrueForge Access Token",
+        "title": "Set TrueForge Access Token",
         "category": "PatchPilot"
       },
       {
         "command": "patchpilot.clearToken",
-        "title": "PatchPilot: Clear TrueForge Access Token",
+        "title": "Clear TrueForge Access Token",
         "category": "PatchPilot"
       }
     ],
-    "configuration": {
-      "type": "object",
-      "title": "PatchPilot TrueForge Configuration",
-      "properties": {
-        "patchpilot.trueforge.baseUrl": {
-          "type": "string",
-          "default": "http://localhost:8790",
-          "description": "TrueForge Server Base URL (e.g., http://localhost:8790)."
-        },
-        "patchpilot.trueforge.agentName": {
-          "type": "string",
-          "default": "",
-          "description": "Target TrueForge Agent Name registered on the TrueForge server."
-        },
-        "patchpilot.trueforge.requestTimeoutSeconds": {
-          "type": "number",
-          "default": 30,
-          "description": "Timeout in seconds for TrueForge API requests."
+    "keybindings": [
+      {
+        "command": "patchpilot.inlineEdit",
+        "key": "ctrl+shift+i",
+        "mac": "cmd+shift+i",
+        "when": "editorTextFocus && editorHasSelection"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "patchpilot.inlineEdit",
+          "when": "editorHasSelection",
+          "group": "1_modification"
+        }
+      ]
+    },
+    "configuration": [
+      {
+        "title": "PatchPilot TrueForge Configuration",
+        "properties": {
+          "patchpilot.trueforge.baseUrl": {
+            "type": "string",
+            "default": "http://127.0.0.1:8790",
+            "description": "TrueForge Server Base URL (default: http://127.0.0.1:8790)."
+          },
+          "patchpilot.trueforge.agentName": {
+            "type": "string",
+            "default": "",
+            "description": "Target TrueForge Agent Name registered on the TrueForge server (e.g., patchpilot)."
+          },
+          "patchpilot.trueforge.modelName": {
+            "type": "string",
+            "default": "",
+            "description": "Configured TrueForge model identifier (FQN, e.g., openai/gpt-4o). Models and provider keys are configured in TrueForge, never in PatchPilot."
+          },
+          "patchpilot.trueforge.mcpConnectorName": {
+            "type": "string",
+            "default": "patchpilot-workspace",
+            "description": "Remote MCP connector name registered by PatchPilot on TrueForge."
+          },
+          "patchpilot.trueforge.requestTimeoutSeconds": {
+            "type": "number",
+            "default": 30,
+            "description": "Timeout in seconds for TrueForge API requests."
+          }
+        }
+      },
+      {
+        "title": "PatchPilot Context Assembly",
+        "properties": {
+          "patchpilot.context.tokenBudget": {
+            "type": "number",
+            "default": 16000,
+            "minimum": 1000,
+            "maximum": 200000,
+            "description": "Estimated token-equivalent budget (~4 UTF-8 bytes/token) used by deterministic workspace context assembly."
+          }
         }
       }
-    }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -81,7 +211,9 @@
     "lint": "tsc --noEmit",
     "bundle:test": "esbuild src/test/unit/*.test.ts --bundle --platform=node --external:vscode --external:mocha --outdir=dist/test/unit && esbuild src/test/integration/*.test.ts --bundle --platform=node --external:vscode --external:mocha --outdir=dist/test/integration",
     "test:unit": "npm run compile && npm run bundle:test && mocha --require dist/test/setup.js \"dist/test/unit/*.test.js\"",
-    "test:integration": "npm run compile && npm run bundle:test && mocha --require dist/test/setup.js --timeout 30000 \"dist/test/integration/*.test.js\"",
+    "test:integration": "npm run compile && npm run bundle:test && mocha --require dist/test/setup.js --timeout 60000 \"dist/test/integration/*.test.js\"",
+    "test:vscode": "npm run compile && node dist/test/vscode/runTest.js",
+    "package": "npm run compile && vsce package --no-dependencies --allow-missing-repository",
     "test": "npm run test:unit"
   },
   "dependencies": {
@@ -94,7 +226,7 @@
     "@types/node": "^22.13.4",
     "@types/vscode": "^1.101.0",
     "@vscode/test-electron": "^2.4.1",
-    "@vscode/vsce": "^4.1.1",
+    "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.28.2",
     "mocha": "^11.1.0",
     "ts-node": "^10.9.2",

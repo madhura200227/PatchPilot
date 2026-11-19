@@ -1,10 +1,10 @@
 import assert from "node:assert";
 import * as vscode from "vscode";
 import { activate, deactivate } from "../../extension";
-import { createMockExtensionContext, MockSecretStorage } from "../testHelpers";
+import { createMockExtensionContext } from "../testHelpers";
 
 describe("Extension Host Lifecycle & Command Registration", () => {
-  it("should activate extension cleanly, register all commands, and initialize state", async () => {
+  it("should activate extension cleanly, register all MVP and legacy commands, and initialize state", async () => {
     const mockContext = createMockExtensionContext();
 
     const result = activate(mockContext);
@@ -16,13 +16,28 @@ describe("Extension Host Lifecycle & Command Registration", () => {
     assert.ok(result.sessionManager, "SessionManager must be initialized");
     assert.ok(result.turnStreamManager, "TurnStreamManager must be initialized");
     assert.ok(result.cancellationManager, "CancellationManager must be initialized");
+    assert.ok(result.controller, "PatchPilotController must be initialized");
+    assert.ok(result.agentViewProvider, "AgentViewProvider must be initialized");
+    assert.ok(result.reviewPanelProvider, "ReviewPanelProvider must be initialized");
 
-    // Check subscriptions in context
-    assert.ok(mockContext.subscriptions.length >= 7, "All commands and listeners must be registered in subscriptions");
+    assert.ok(mockContext.subscriptions.length >= 20, "All commands, views, and listeners must be registered");
 
-    // Verify commands exist in VS Code registry
     const registeredCommands = await vscode.commands.getCommands(true);
     const expectedCommands = [
+      // MVP required commands
+      "patchpilot.openAgent",
+      "patchpilot.inlineEdit",
+      "patchpilot.startAgentRun",
+      "patchpilot.cancelRun",
+      "patchpilot.reviewChanges",
+      "patchpilot.applyAcceptedChanges",
+      "patchpilot.discardChanges",
+      "patchpilot.undoLastApply",
+      "patchpilot.checkTrueForge",
+      "patchpilot.configureTrueForge",
+      "patchpilot.showSession",
+      "patchpilot.selectWorkspace",
+      // Legacy M0 commands
       "patchpilot.checkConnection",
       "patchpilot.startSession",
       "patchpilot.sendTestMessage",
@@ -40,9 +55,7 @@ describe("Extension Host Lifecycle & Command Registration", () => {
     }
   });
 
-  it("should deactivate cleanly without throwing", () => {
-    assert.doesNotThrow(() => {
-      deactivate();
-    }, "Extension deactivation must execute cleanly");
+  it("should deactivate cleanly without throwing", async () => {
+    await deactivate();
   });
 });
