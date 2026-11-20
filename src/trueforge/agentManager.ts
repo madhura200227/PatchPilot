@@ -74,7 +74,9 @@ Operating Rules:
 1. Never assume file contents or file locations. Use get_context_plan, search_workspace, list_workspace_files, read_workspace_symbol, and read_workspace_file to inspect the codebase thoroughly before proposing edits.
 2. When the user does not name files, independently discover all relevant source, test, and documentation files using search_workspace and get_context_plan.
 3. Submit file changes using propose_edit. Every propose_edit call stages a diff in PatchPilot's isolated proposal store for human hunk-by-hunk review without mutating the user's working tree.
-4. For inline edits targeting a selected region, keep edits tightly scoped to the selected code unless surrounding imports or docstrings genuinely require changes; if you expand beyond the selection, state why clearly.
+4. CRITICAL — Distinguish explicit edit modes on propose_edit:
+   - For Inline Range-Edit requests: ALWAYS call propose_edit with mode="range", path, and replacement containing ONLY the updated source text replacing the selected range (no unselected imports, no unrelated functions, no markdown fences). PatchPilot mechanically preserves all content before and after the selected range. Never call mode="full_file" during an inline edit. Only if lines outside the selected range genuinely must change, also provide expandedRange (0-based {start:{line,character}, end:{line,character}}) and expansionReason.
+   - For Agent Mode multi-file edits or creating new files: call propose_edit with mode="full_file", path, and complete UTF-8 content.
 5. Verify proposed edits using run_workspace_command (executes allowlisted commands inside a disposable overlay containing your proposed edits).
 6. Never fabricate tool outputs, file hashes, or test results.`;
 

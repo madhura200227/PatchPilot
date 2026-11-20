@@ -6,7 +6,7 @@ import { ExtensionState, TurnStatus } from "../state/extensionState";
 import { ApprovalManager, PendingToolApproval } from "./approvalManager";
 import { ITrueForgeClientFactory } from "./clientFactory";
 import { TrueForgeStreamError } from "./errors";
-import { classifyTurnEvent, ExtractedToolCall } from "./eventTypes";
+import { classifyTurnEvent, ExtractedToolCall, mergeEventDelta } from "./eventTypes";
 
 export interface TurnStreamCallbacks {
   onTurnCreated?: (turnId: string) => void;
@@ -184,7 +184,26 @@ export class TurnStreamManager {
 
     const seenEventIds = new Set<string>();
     const toolCallsById = new Map<string, ExtractedToolCall>();
+    const emittedToolCallIds = new Set<string>();
+    const messageBaseById = new Map<string, TrueForgeApi.ModelMessageEvent>();
     let hasStreamedDeltasInCurrentMsg = false;
+
+    const emitNewToolCallsFromMessage = (msgEvent: TrueForgeApi.ModelMessageEvent): void => {
+      const reclassified = classifyTurnEvent(msgEvent);
+      if (reclassified.toolCalls && reclassified.toolCalls.length > 0) {
+        for (const tc of reclassified.toolCalls) {
+          toolCallsById.set(tc.id, tc);
+          if (!emittedToolCallIds.has(tc.id)) {
+            emittedToolCallIds.add(tc.id);
+            result.toolCalls.push(tc);
+            this.logger.info(
+              `[EVENT: tool.call] ${tc.name} (id=${tc.id}, args=${sanitizeSecretText(tc.argumentsRaw).slice(0, 240)})`
+            );
+            callbacks?.onToolCall?.(tc);
+          }
+        }
+      }
+    };
 
     const consumeStream = async (
       stream: AsyncIterable<TrueForgeApi.TurnStreamingEvent | Record<string, unknown>>
@@ -195,8 +214,10 @@ export class TurnStreamManager {
       for await (const rawEvent of stream) {
         const classified = classifyTurnEvent(rawEvent);
 
-        // Deduplicate replayed events on reconnection
-        if (classified.id) {
+        // Deduplicate non-delta replayed events on reconnection.
+        // CRITICAL: model.message.delta shares the same `id` as its base `model.message`,
+        // so deltas must NEVER be dropped by `seenEventIds`.
+        if (classified.id && classified.type !== "model.message.delta") {
           if (seenEventIds.has(classified.id)) {
             continue;
           }
@@ -219,6 +240,14 @@ export class TurnStreamManager {
           }
 
           case "model.message.delta": {
+            const deltaEvent = rawEvent as TrueForgeApi.ModelMessageDeltaEvent;
+            if (classified.id && messageBaseById.has(classified.id)) {
+              const baseMsg = messageBaseById.get(classified.id)!;
+              mergeEventDelta(baseMsg, deltaEvent);
+              if (deltaEvent.finishReason && baseMsg.toolCalls && baseMsg.toolCalls.length > 0) {
+                emitNewToolCallsFromMessage(baseMsg);
+              }
+            }
             if (classified.deltaText) {
               hasStreamedDeltasInCurrentMsg = true;
               this.state.appendTurnText(classified.deltaText);
@@ -233,6 +262,14 @@ export class TurnStreamManager {
           }
 
           case "model.message": {
+            const msgEvent = rawEvent as TrueForgeApi.ModelMessageEvent;
+            if (classified.id) {
+              // Clone shallowly so SDK mergeEventDelta can accumulate subsequent deltas in place
+              messageBaseById.set(classified.id, {
+                ...msgEvent,
+                toolCalls: Array.isArray(msgEvent.toolCalls) ? [...msgEvent.toolCalls] : undefined,
+              });
+            }
             if (classified.modelName) {
               result.modelName = classified.modelName;
             }
@@ -244,21 +281,19 @@ export class TurnStreamManager {
             }
             hasStreamedDeltasInCurrentMsg = false;
 
-            if (classified.toolCalls && classified.toolCalls.length > 0) {
-              for (const tc of classified.toolCalls) {
-                toolCallsById.set(tc.id, tc);
-                result.toolCalls.push(tc);
-                this.logger.info(
-                  `[EVENT: tool.call] ${tc.name} (id=${tc.id}, args=${sanitizeSecretText(tc.argumentsRaw).slice(0, 240)})`
-                );
-                callbacks?.onToolCall?.(tc);
-              }
-            }
+            emitNewToolCallsFromMessage(msgEvent);
             break;
           }
 
           case "tool.response": {
             const callId = classified.toolResponseCallId || "unknown";
+            if (!toolCallsById.has(callId)) {
+              for (const baseMsg of messageBaseById.values()) {
+                if (baseMsg.toolCalls && baseMsg.toolCalls.length > 0) {
+                  emitNewToolCallsFromMessage(baseMsg);
+                }
+              }
+            }
             const toolName = toolCallsById.get(callId)?.name || "tool";
             const content = sanitizeSecretText(classified.toolResponseContent || "");
             this.logger.info(
@@ -288,6 +323,10 @@ export class TurnStreamManager {
 
               const pendingBatch: PendingToolApproval[] = [];
               for (const ref of classified.approvalRefs) {
+                // Ensure any delta-merged toolCalls from sourceEventId are extracted before lookup
+                if (!toolCallsById.has(ref.toolCallId) && messageBaseById.has(ref.sourceEventId)) {
+                  emitNewToolCallsFromMessage(messageBaseById.get(ref.sourceEventId)!);
+                }
                 const matchedCall = toolCallsById.get(ref.toolCallId);
                 const waiter = approvalManager.registerPendingApproval({
                   sessionId,
@@ -328,11 +367,16 @@ export class TurnStreamManager {
           }
 
           case "turn.update": {
+            if (classified.liveTurnStatus === "running") {
+              pausedForApproval = false;
+              this.state.setTurnStatus("RUNNING");
+            }
             this.logger.debug(`[EVENT: turn.update] status=${classified.liveTurnStatus || "unknown"}`);
             break;
           }
 
           case "turn.done": {
+            pausedForApproval = false;
             this.logger.streamChunk("\n");
             const termStatus = classified.terminalStatus || "done";
             if (termStatus === "cancelled") {

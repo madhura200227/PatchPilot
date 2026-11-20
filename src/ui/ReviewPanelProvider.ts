@@ -350,7 +350,8 @@ export class ReviewPanelProvider {
             <div class="file-header">
               <div>
                 <span class="file-path">\${esc(p.relativePath)}</span>
-                <span class="badge">\${p.isNewFile ? 'NEW FILE' : 'MODIFIED'}</span>
+                <span class="badge">\${p.isNewFile ? 'NEW FILE' : (p.editMode === 'range' ? 'RANGE EDIT' : 'FULL-FILE EDIT')}</span>
+                \${p.editMode === 'range' && p.prefixPreserved && p.suffixPreserved ? '<span class="badge accepted">PREFIX/SUFFIX PRESERVED</span>' : ''}
                 <span class="badge">\${esc(p.status)}</span>
                 <div style="font-size:11px;color:var(--vscode-descriptionForeground);margin-top:3px;">\${esc(p.summary)}</div>
               </div>

@@ -4,6 +4,7 @@ import { ILogger } from "../output/logger";
 import { ITrueForgeClientFactory } from "../trueforge/clientFactory";
 import { PATCHPILOT_MCP_TOOL_NAMES } from "./mcpServerCore";
 import { InlineSelectionConstraint, ProposalStore } from "./proposalStore";
+import { InlineEditContext } from "./rangeEdit";
 import { ManagedMcpProcessStatus, WorkspaceProcessManager } from "./WorkspaceProcessManager";
 
 /**
@@ -155,12 +156,13 @@ export class WorkspaceMcpAdapter {
 
   public async setActiveRun(
     runId: string | null,
-    selectionConstraint?: InlineSelectionConstraint | null
+    selectionConstraint?: InlineSelectionConstraint | null,
+    inlineEditContext?: InlineEditContext | null
   ): Promise<void> {
     if (this.proposalStore) {
-      this.proposalStore.setActiveRun(runId, selectionConstraint);
+      this.proposalStore.setActiveRun(runId, selectionConstraint, inlineEditContext);
     }
-    await this.processManager.setActiveRun(runId, selectionConstraint);
+    await this.processManager.setActiveRun(runId, selectionConstraint, inlineEditContext);
   }
 
   public async cancelActiveOperations(

@@ -34,6 +34,7 @@ import { TurnExecutionResult, TurnStreamManager } from "../trueforge/turnStream"
 import { applyAcceptedProposals, ApplyAcceptedResult } from "../workspace/hunkReview";
 import { computeSha256, HunkDecision } from "../workspace/patchEngine";
 import { FileProposal, InlineSelectionConstraint } from "../workspace/proposalStore";
+import { captureSelectionContext, InlineEditContext } from "../workspace/rangeEdit";
 import { UndoManager, UndoResult } from "../workspace/undoManager";
 import {
   createVscodeSymbolLookup,
@@ -100,6 +101,7 @@ export interface InlineEditPayload {
   originalVersion: number;
   originalSha256: string;
   instruction: string;
+  inlineEditContext: InlineEditContext;
 }
 
 export class PatchPilotController {
@@ -695,34 +697,45 @@ export class PatchPilotController {
             endLine: options.inlineEdit.endLine,
           }
         : null;
-      await this.mcpAdapter.setActiveRun(runId, selectionConstraint);
+      const inlineEditContext: InlineEditContext | null = options.inlineEdit
+        ? options.inlineEdit.inlineEditContext
+        : null;
+      await this.mcpAdapter.setActiveRun(runId, selectionConstraint, inlineEditContext);
 
       // 3. Build prompt payload for TrueForge:
-      //    - For Inline Edit: include file path, selection range, selected source, surrounding context, instruction.
+      //    - For Inline Edit: explicit RANGE-EDIT mode with zero-based UTF-16 coordinates,
+      //      verbatim selected text, read-only surrounding context, and instruction to supply
+      //      ONLY the replacement for the selected range via propose_edit(mode="range", replacement=...).
       //    - For Agent Mode with explicit @file/@symbol: include resolved explicit references ONLY.
       //    - For Agent Mode WITHOUT explicit file mentions (e.g. Task B): DO NOT leak discovered filenames;
       //      TrueForge independently searches and discovers files via MCP tools!
       let finalPrompt = trimmed;
       if (options.inlineEdit) {
         const ie = options.inlineEdit;
+        const ctx = ie.inlineEditContext;
         finalPrompt = [
-          "Inline Edit Request:",
+          "Inline Range-Edit Request (MODE = range):",
           `File: ${ie.relativePath}`,
-          `Selected Line Range: ${ie.startLine}-${ie.endLine}`,
+          `Selected Lines (1-based display): ${ie.startLine}-${ie.endLine}`,
+          `Selected Range (0-based UTF-16): start={line: ${ctx.range.start.line}, character: ${ctx.range.start.character}}, end={line: ${ctx.range.end.line}, character: ${ctx.range.end.character}}`,
           "",
-          "Selected Code:",
+          "EXACT Selected Text to Replace:",
           "```",
           ie.selectedText,
           "```",
           "",
-          "Surrounding Context (with 1-based line numbers):",
+          "Read-Only Surrounding Context (for reference ONLY — do NOT include in replacement):",
           "```",
           ie.surroundingContext,
           "```",
           "",
           `User Instruction: ${ie.instruction}`,
           "",
-          "Use read_workspace_file if you need additional context, then call propose_edit with the complete updated file content so the user can review the diff hunk by hunk. Keep edits focused on the selected region unless surrounding lines genuinely require updates.",
+          "CRITICAL TOOL CONTRACT:",
+          `- Call propose_edit with path="${ie.relativePath}", mode="range", and replacement="<ONLY the updated text replacing the exact selected range above>".`,
+          "- Do NOT pass mode=\"full_file\", do NOT pass unselected imports or other functions from the file, and do NOT wrap replacement in markdown code fences.",
+          "- PatchPilot mechanically preserves every character before and after the selected range and constructs the full-file diff safely.",
+          "- Only if lines outside the selected range genuinely must change, also pass expandedRange (0-based {start:{line,character}, end:{line,character}}) and expansionReason explaining why.",
         ].join("\n");
       } else if (mentions.fileMentions.length > 0 || mentions.symbolMentions.length > 0) {
         const explicitBlocks: string[] = [];
@@ -854,7 +867,7 @@ export class PatchPilotController {
     } finally {
       this.lockedTurnWorkspaceRoot = null;
       this.activeRunId = null;
-      await this.mcpAdapter.setActiveRun(null, null).catch(() => {});
+      await this.mcpAdapter.setActiveRun(null, null, null).catch(() => {});
       this.emitUiUpdate();
     }
   }
@@ -897,10 +910,41 @@ export class PatchPilotController {
       return undefined;
     }
 
+    // Ensure disk content matches editor buffer before capturing SHA-256 & offsets
+    if (doc.isDirty) {
+      const saveChoice = await vscode.window.showWarningMessage(
+        `PatchPilot Inline Edit: "${relativePath}" has unsaved changes. Save the file before running Inline Edit so selection offsets match disk?`,
+        "Save & Continue",
+        "Cancel"
+      );
+      if (saveChoice !== "Save & Continue") {
+        return undefined;
+      }
+      const saved = await doc.save();
+      if (!saved) {
+        vscode.window.showErrorMessage(`PatchPilot Inline Edit: Failed to save "${relativePath}".`);
+        return undefined;
+      }
+    }
+
+    // Capture immutable selection snapshot BEFORE opening input box so edits during prompt entry are detected
+    const capturedVersion = doc.version;
+    const fullText = doc.getText();
+    const zeroBasedRange = {
+      start: { line: selection.start.line, character: selection.start.character },
+      end: { line: selection.end.line, character: selection.end.character },
+    };
+    const inlineEditContext = captureSelectionContext(
+      relativePath,
+      fullText,
+      zeroBasedRange,
+      capturedVersion
+    );
+
     const instruction =
       instructionOverride ??
       (await vscode.window.showInputBox({
-        title: `PatchPilot Inline Edit (${relativePath}:${selection.start.line + 1}-${selection.end.line + 1})`,
+        title: `PatchPilot Inline Edit (${relativePath}:${inlineEditContext.displayStartLine}-${inlineEditContext.displayEndLine})`,
         prompt: "Describe the requested change in plain language",
         placeHolder:
           "e.g. Treat the values 'off' and 'n' as false as well, case-insensitively...",
@@ -911,10 +955,14 @@ export class PatchPilotController {
       return undefined;
     }
 
-    const startLine = selection.start.line + 1;
-    const endLine = selection.end.line + 1;
-    const selectedText = doc.getText(selection);
-    const fullText = doc.getText();
+    // Stale check: reject if document changed while user typed the instruction
+    if (doc.version !== capturedVersion || computeSha256(doc.getText()) !== inlineEditContext.originalSha256) {
+      vscode.window.showWarningMessage(
+        `PatchPilot Inline Edit: "${relativePath}" changed after selection was captured. Please re-select and invoke Inline Edit again.`
+      );
+      return undefined;
+    }
+
     const lines = fullText.split(/\r?\n/);
     const ctxStart = Math.max(0, selection.start.line - 15);
     const ctxEnd = Math.min(lines.length - 1, selection.end.line + 15);
@@ -926,13 +974,14 @@ export class PatchPilotController {
     const payload: InlineEditPayload = {
       relativePath,
       absolutePath: absPath,
-      startLine,
-      endLine,
-      selectedText,
+      startLine: inlineEditContext.displayStartLine,
+      endLine: inlineEditContext.displayEndLine,
+      selectedText: inlineEditContext.selectedText,
       surroundingContext,
-      originalVersion: doc.version,
-      originalSha256: computeSha256(fullText),
+      originalVersion: capturedVersion,
+      originalSha256: inlineEditContext.originalSha256,
       instruction: instruction.trim(),
+      inlineEditContext,
     };
 
     return this.startAgentRun(instruction.trim(), {

@@ -122,13 +122,40 @@ export function classifyTurnEvent(
         result.toolCalls = msg.toolCalls.map((tc) => {
           const fnName = tc.function?.name || "unknown_tool";
           const argsRaw = typeof tc.function?.arguments === "string" ? tc.function.arguments : "{}";
+          const parsedArguments = tryParseJsonObject(argsRaw);
           const info = tc.toolInfo as { type?: string; name?: string; serverName?: string } | undefined;
+
+          // When TrueForge uses deferred MCP loading (preload: false), tool calls are
+          // wrapped in TrueForge's system tool "call_tool" with { mcp_server, tool_name, input }.
+          let resolvedName = info?.name || fnName;
+          let resolvedServer = info?.serverName;
+          let resolvedArgsRaw = argsRaw;
+          let resolvedParsed = parsedArguments;
+
+          const wrappedToolName =
+            typeof parsedArguments?.tool_name === "string"
+              ? parsedArguments.tool_name
+              : typeof parsedArguments?.tool === "string"
+                ? parsedArguments.tool
+                : undefined;
+
+          if (resolvedName === "call_tool" && parsedArguments && wrappedToolName) {
+            resolvedName = wrappedToolName;
+            if (typeof parsedArguments.mcp_server === "string") {
+              resolvedServer = parsedArguments.mcp_server;
+            }
+            if (parsedArguments.input && typeof parsedArguments.input === "object") {
+              resolvedParsed = parsedArguments.input as Record<string, unknown>;
+              resolvedArgsRaw = JSON.stringify(parsedArguments.input);
+            }
+          }
+
           return {
             id: tc.id,
-            name: info?.name || fnName,
-            serverName: info?.serverName,
-            argumentsRaw: argsRaw,
-            parsedArguments: tryParseJsonObject(argsRaw),
+            name: resolvedName,
+            serverName: resolvedServer,
+            argumentsRaw: resolvedArgsRaw,
+            parsedArguments: resolvedParsed,
           };
         });
       }
