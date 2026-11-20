@@ -1,7 +1,8 @@
-import { TrueForge } from "@truefoundry/trueforge-sdk";
 import { TrueForgeResolvedConfig } from "../config/configuration";
-import { ExtensionState, TurnStatus } from "../state/extensionState";
 import { ILogger } from "../output/logger";
+import { sanitizeSecretText } from "../security/secretFilter";
+import { ExtensionState, TurnStatus } from "../state/extensionState";
+import { ApprovalManager } from "./approvalManager";
 import { ITrueForgeClientFactory } from "./clientFactory";
 import { TrueForgeCancellationError } from "./errors";
 
@@ -11,7 +12,17 @@ export interface CancellationResult {
   clientAborted: boolean;
   serverAccepted: boolean;
   authoritativeStatus?: TurnStatus | string;
+  abortedLocalCommands: number;
+  discardedProposals: number;
   message: string;
+}
+
+export interface CancelHookOptions {
+  runId?: string;
+  approvalManager?: ApprovalManager;
+  cancelLocalMcp?: (runId?: string) => Promise<{ abortedCommands: number; discardedProposals: number }>;
+  pollAttempts?: number;
+  pollIntervalMs?: number;
 }
 
 export class CancellationManager {
@@ -30,23 +41,39 @@ export class CancellationManager {
   }
 
   /**
-   * Performs coordinated cancellation across Layer A (client stream abort) and Layer B (server turn cancel).
+   * Coordinates safe multi-layer cancellation:
+   * 1. Requests authoritative TrueForge server-side turn cancellation (POST /sessions/:id/cancel).
+   * 2. Cancels pending local approvals and active local MCP subprocesses + unaccepted proposals.
+   * 3. Polls authoritative server turn state via getTurn() until terminal status is confirmed.
+   * 4. Aborts the local client SSE stream controller cleanly.
    */
-  public async cancelActiveTurn(config: TrueForgeResolvedConfig): Promise<CancellationResult> {
+  public async cancelActiveTurn(
+    config: TrueForgeResolvedConfig,
+    hooks?: CancelHookOptions
+  ): Promise<CancellationResult> {
     const sessionId = this.state.activeSessionId;
     const turnId = this.state.activeTurnId;
 
     if (!sessionId) {
+      // Still clean up any stray local MCP processes if hooks were provided
+      let abortedLocalCommands = 0;
+      let discardedProposals = 0;
+      if (hooks?.cancelLocalMcp) {
+        const local = await hooks.cancelLocalMcp(hooks.runId);
+        abortedLocalCommands = local.abortedCommands;
+        discardedProposals = local.discardedProposals;
+      }
       this.logger.warn("Cannot cancel: no active session found.");
       return {
         sessionId: "",
         clientAborted: false,
         serverAccepted: false,
+        abortedLocalCommands,
+        discardedProposals,
         message: "No active session to cancel.",
       };
     }
 
-    // Guard against duplicate/concurrent cancellation dispatches
     if (!this.state.acquireCancelGuard()) {
       this.logger.debug("Cancellation already in progress.");
       return {
@@ -54,6 +81,8 @@ export class CancellationManager {
         turnId,
         clientAborted: false,
         serverAccepted: false,
+        abortedLocalCommands: 0,
+        discardedProposals: 0,
         message: "Cancellation is already in progress.",
       };
     }
@@ -63,81 +92,123 @@ export class CancellationManager {
       turnId,
       clientAborted: false,
       serverAccepted: false,
+      abortedLocalCommands: 0,
+      discardedProposals: 0,
       message: "",
     };
+
+    const activeAbort = this.state.activeAbortController;
 
     try {
       this.logger.info(`--- Initiating Cancellation for Session: ${sessionId} ---`);
 
-      // 1. Layer A: Local Client Stream Abort
-      const activeAbort = this.state.activeAbortController;
-      if (activeAbort && !activeAbort.signal.aborted) {
-        try {
-          activeAbort.abort();
-          result.clientAborted = true;
-          this.logger.info("[Layer A] Client AbortController signal fired.");
-        } catch (abortErr: unknown) {
-          this.logger.warn(`Client abort error: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}`);
-        }
-      } else {
-        this.logger.debug("[Layer A] No active stream controller to abort or already aborted.");
-      }
-
-      // 2. Layer B: Authoritative Server-Side Turn Cancellation
+      // 1. Server-side cancellation FIRST (authoritative TrueForge turn cancel)
       const client = this.clientFactory.createClient(config);
       try {
-        this.logger.info(`[Layer B] Requesting server-side cancellation (POST /api/v1/sessions/${sessionId}/cancel)...`);
+        this.logger.info(
+          `[Layer B] Requesting server-side cancellation (POST /api/v1/sessions/${sessionId}/cancel)...`
+        );
         await client.sessions.cancel(sessionId);
         result.serverAccepted = true;
         this.logger.info("[Layer B] Server accepted turn cancellation request.");
       } catch (serverErr: unknown) {
-        const errMsg = serverErr instanceof Error ? serverErr.message : String(serverErr);
-
-        // Precondition failed (412) typically indicates the turn already finished or no turn was running
+        const errMsg = sanitizeSecretText(
+          serverErr instanceof Error ? serverErr.message : String(serverErr)
+        );
         if (
           errMsg.includes("PreconditionFailed") ||
           errMsg.includes("412") ||
           errMsg.includes("no running turn") ||
           errMsg.includes("not running")
         ) {
-          result.serverAccepted = true; // Endpoint responded functionally: turn is already idle/completed
-          this.logger.info(`[Layer B] Server indicated turn is not in a cancellable running state: ${errMsg}`);
+          result.serverAccepted = true;
+          this.logger.info(
+            `[Layer B] Server indicated turn is not in a cancellable running state: ${errMsg}`
+          );
         } else {
-          this.logger.error(`[Layer B] Server cancellation request failed: ${errMsg}`, serverErr);
+          this.logger.error(`[Layer B] Server cancellation request failed: ${errMsg}`);
           result.message = `Server cancellation failed: ${errMsg}`;
         }
       }
 
-      // 3. Verify Authoritative Turn State if turnId exists
-      if (turnId) {
+      // 2. Abort any pending approval UI prompts & active local MCP command subprocesses / proposals
+      hooks?.approvalManager?.cancelAllPending("Turn cancelled by user");
+      if (hooks?.cancelLocalMcp) {
         try {
-          const authTurn = await client.sessions.getTurn(sessionId, turnId);
-          const serverState = authTurn.data.state?.status;
-          result.authoritativeStatus = serverState;
-          this.logger.info(`Authoritative post-cancel turn state: ${serverState}`);
-
-          if (serverState === "cancelled") {
-            this.state.setTurnStatus("CANCELLED");
-          } else if (serverState === "done") {
-            this.state.setTurnStatus("COMPLETED");
-            this.logger.info("Turn completed before cancellation could take effect.");
-          } else if (serverState === "error") {
-            this.state.setTurnStatus("ERROR");
-          }
-        } catch (getTurnErr: unknown) {
-          this.logger.warn(
-            `Could not query authoritative turn status post-cancel: ${getTurnErr instanceof Error ? getTurnErr.message : String(getTurnErr)}`
+          const localRes = await hooks.cancelLocalMcp(hooks.runId);
+          result.abortedLocalCommands = localRes.abortedCommands;
+          result.discardedProposals = localRes.discardedProposals;
+          this.logger.info(
+            `[Layer C] Local MCP cleanup: aborted ${localRes.abortedCommands} command(s), discarded ${localRes.discardedProposals} pending proposal(s).`
           );
+        } catch (localErr: unknown) {
+          this.logger.warn(
+            `[Layer C] Local MCP cleanup warning: ${sanitizeSecretText(localErr instanceof Error ? localErr.message : String(localErr))}`
+          );
+        }
+      }
+
+      // 3. Query authoritative server turn state (polling briefly while transitioning to terminal state)
+      if (turnId) {
+        const maxPolls = hooks?.pollAttempts ?? 5;
+        const pollIntervalMs = hooks?.pollIntervalMs ?? 200;
+
+        for (let attempt = 0; attempt < maxPolls; attempt++) {
+          try {
+            const authTurn = await client.sessions.getTurn(sessionId, turnId);
+            const serverState = authTurn.data.state?.status;
+            result.authoritativeStatus = serverState;
+
+            if (serverState === "cancelled") {
+              this.state.setTurnStatus("CANCELLED");
+              this.logger.info("Authoritative post-cancel turn state confirmed: cancelled");
+              break;
+            } else if (serverState === "done") {
+              this.state.setTurnStatus("COMPLETED");
+              this.logger.info("Turn completed before cancellation could take effect.");
+              break;
+            } else if (serverState === "error") {
+              this.state.setTurnStatus("ERROR");
+              this.logger.info("Authoritative post-cancel turn state: error");
+              break;
+            }
+
+            if (attempt < maxPolls - 1) {
+              await new Promise((r) => setTimeout(r, pollIntervalMs));
+            }
+          } catch (getTurnErr: unknown) {
+            this.logger.warn(
+              `Could not query authoritative turn status post-cancel: ${sanitizeSecretText(getTurnErr instanceof Error ? getTurnErr.message : String(getTurnErr))}`
+            );
+            break;
+          }
         }
       } else {
         this.state.setTurnStatus("CANCELLED");
       }
 
-      result.message = "Turn cancellation completed.";
+      // 4. Client SSE stream abort (clean teardown of any lingering HTTP stream reader)
+      if (activeAbort && !activeAbort.signal.aborted) {
+        try {
+          activeAbort.abort();
+          result.clientAborted = true;
+          this.logger.info("[Layer A] Client AbortController signal fired.");
+        } catch (abortErr: unknown) {
+          this.logger.warn(
+            `Client abort error: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}`
+          );
+        }
+      } else {
+        this.logger.debug("[Layer A] No active stream controller to abort or already aborted.");
+      }
+
+      result.message =
+        result.message ||
+        `Turn cancellation processed (authoritative status: ${result.authoritativeStatus || "cancelled"}, discarded ${result.discardedProposals} unaccepted proposal(s)).`;
       return result;
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Cancellation error: ${errMsg}`, err);
+      const errMsg = sanitizeSecretText(err instanceof Error ? err.message : String(err));
+      this.logger.error(`Cancellation error: ${errMsg}`);
       throw new TrueForgeCancellationError(`Cancellation failed: ${errMsg}`, sessionId, turnId);
     } finally {
       this.state.releaseCancelGuard();
