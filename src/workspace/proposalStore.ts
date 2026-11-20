@@ -18,16 +18,27 @@ import {
   HunkDecision,
   SelectionExpansionReport,
 } from "./patchEngine";
+import {
+  applyRangeReplacement,
+  EditMode,
+  InlineEditContext,
+  RangeEditValidationError,
+  ZeroBasedRange,
+} from "./rangeEdit";
 
 /**
  * PatchPilot Isolated Proposal Store
  *
  * Stores all agent-proposed file edits in an isolated temporary directory outside the user's
  * workspace working tree. Never writes to the user's workspace.
+ *
+ * Enforces explicit edit modes ("range" vs "full_file") so inline-edit selections can never
+ * be misapplied as destructive full-file replacements.
  */
 
 export type ProposalStatus = "pending" | "partially_applied" | "applied" | "discarded" | "stale";
 
+/** Legacy line-only selection constraint preserved for compatibility */
 export interface InlineSelectionConstraint {
   relativePath: string;
   startLine: number;
@@ -38,6 +49,7 @@ export interface FileProposal {
   proposalId: string;
   runId: string;
   relativePath: string;
+  editMode: EditMode;
   isNewFile: boolean;
   originalSha256: string | null;
   proposedSha256: string;
@@ -49,7 +61,10 @@ export interface FileProposal {
   staleReason?: string;
   createdAt: string;
   updatedAt: string;
-  selectionExpansion?: SelectionExpansionReport;
+  selectionRange?: ZeroBasedRange;
+  prefixPreserved?: boolean;
+  suffixPreserved?: boolean;
+  selectionExpansion?: SelectionExpansionReport & { explicitlyRequested?: boolean };
 }
 
 interface PersistedStorePayload {
@@ -58,11 +73,25 @@ interface PersistedStorePayload {
   cancelledRunIds: string[];
   activeRunId: string | null;
   selectionConstraint: InlineSelectionConstraint | null;
+  inlineEditContext: InlineEditContext | null;
 }
 
 export interface CreateProposalInput {
   relativePath: string;
-  proposedContent: string;
+  /** Explicit edit mode: "range" for inline-edit replacement, "full_file" for Agent Mode full file */
+  mode?: EditMode;
+  /** Replacement text for the selected (or expanded) range when mode === "range" */
+  replacement?: string;
+  /** Complete UTF-8 file content when mode === "full_file" (legacy alias for content) */
+  proposedContent?: string;
+  /** Complete UTF-8 file content when mode === "full_file" */
+  content?: string;
+  /** Optional explicit InlineEditContext (if omitted, uses the active run's stored context) */
+  inlineEditContext?: InlineEditContext;
+  /** Optional explicit 0-based expanded range (requires expansionReason) */
+  expandedRange?: ZeroBasedRange;
+  /** Required explanation whenever expandedRange is provided */
+  expansionReason?: string;
   summary?: string;
   runId?: string;
 }
@@ -100,6 +129,7 @@ export class ProposalStore {
         cancelledRunIds: [],
         activeRunId: null,
         selectionConstraint: null,
+        inlineEditContext: null,
       });
     }
   }
@@ -120,10 +150,15 @@ export class ProposalStore {
         cancelledRunIds: [],
         activeRunId: null,
         selectionConstraint: null,
+        inlineEditContext: null,
       };
     }
     const raw = fs.readFileSync(this.storeFile, "utf8");
-    return JSON.parse(raw) as PersistedStorePayload;
+    const parsed = JSON.parse(raw) as PersistedStorePayload;
+    if (parsed.inlineEditContext === undefined) {
+      parsed.inlineEditContext = null;
+    }
+    return parsed;
   }
 
   private savePayload(payload: PersistedStorePayload): void {
@@ -133,17 +168,38 @@ export class ProposalStore {
     fs.renameSync(tmpFile, this.storeFile);
   }
 
-  public setActiveRun(runId: string | null, selectionConstraint?: InlineSelectionConstraint | null): void {
+  public setActiveRun(
+    runId: string | null,
+    selectionConstraint?: InlineSelectionConstraint | null,
+    inlineEditContext?: InlineEditContext | null
+  ): void {
     const payload = this.loadPayload();
     payload.activeRunId = runId;
     if (selectionConstraint !== undefined) {
       payload.selectionConstraint = selectionConstraint;
+    }
+    if (inlineEditContext !== undefined) {
+      payload.inlineEditContext = inlineEditContext;
+      if (inlineEditContext && selectionConstraint === undefined) {
+        payload.selectionConstraint = {
+          relativePath: inlineEditContext.relativePath,
+          startLine: inlineEditContext.displayStartLine,
+          endLine: inlineEditContext.displayEndLine,
+        };
+      }
+    }
+    if (runId === null && inlineEditContext === undefined) {
+      payload.inlineEditContext = null;
     }
     this.savePayload(payload);
   }
 
   public getActiveRunId(): string | null {
     return this.loadPayload().activeRunId;
+  }
+
+  public getActiveInlineEditContext(): InlineEditContext | null {
+    return this.loadPayload().inlineEditContext;
   }
 
   public markRunCancelled(runId: string): number {
@@ -162,6 +218,7 @@ export class ProposalStore {
     if (payload.activeRunId === runId) {
       payload.activeRunId = null;
       payload.selectionConstraint = null;
+      payload.inlineEditContext = null;
     }
     this.savePayload(payload);
     return discarded;
@@ -174,20 +231,9 @@ export class ProposalStore {
 
   /**
    * Creates or updates a file change proposal strictly in isolated proposal storage.
-   * NEVER writes to the actual workspace.
+   * Enforces explicit edit modes ("range" vs "full_file") and NEVER writes to the workspace.
    */
   public async createOrUpdateProposal(input: CreateProposalInput): Promise<ProposalCreationResult> {
-    if (typeof input.proposedContent !== "string") {
-      throw new SecurityError("Proposed content must be a UTF-8 string.");
-    }
-
-    const byteLength = Buffer.byteLength(input.proposedContent, "utf8");
-    if (byteLength > MAX_FILE_SIZE_BYTES) {
-      throw new SecurityError(
-        `Proposed file content (${byteLength} bytes) exceeds maximum limit of ${MAX_FILE_SIZE_BYTES} bytes.`
-      );
-    }
-
     const payload = this.loadPayload();
     const runId = input.runId ?? payload.activeRunId ?? "default-run";
     if (payload.cancelledRunIds.includes(runId)) {
@@ -205,6 +251,29 @@ export class ProposalStore {
     });
     const relativePath = path.relative(this.workspaceRoot, safeTarget).replace(/\\/g, "/");
 
+    const activeInlineCtx =
+      input.inlineEditContext ??
+      (payload.inlineEditContext &&
+      payload.inlineEditContext.relativePath.replace(/\\/g, "/").toLowerCase() ===
+        relativePath.toLowerCase()
+        ? payload.inlineEditContext
+        : null);
+
+    // Determine explicit edit mode — NEVER infer edit mode from string length!
+    const editMode: EditMode = input.mode ?? "full_file";
+
+    // HARD GUARD: During an active inline edit for this file, reject full-file replacement mode
+    // so an incomplete or fragmented model response can NEVER destroy unselected code.
+    if (activeInlineCtx && editMode === "full_file") {
+      throw new RangeEditValidationError(
+        "FULL_FILE_REJECTED_IN_INLINE_EDIT",
+        `An inline-edit session is active for "${relativePath}" (lines ${activeInlineCtx.displayStartLine}-${activeInlineCtx.displayEndLine}). ` +
+          `Full-file replacement is blocked during inline edit to guarantee unselected code is preserved. ` +
+          `Call propose_edit with mode="range" and replacement containing ONLY the updated text for the selected range ` +
+          `(or also provide expandedRange and expansionReason if lines outside the selection genuinely must change).`
+      );
+    }
+
     let isNewFile = false;
     let originalContent = "";
     let originalSha256: string | null = null;
@@ -217,25 +286,87 @@ export class ProposalStore {
       isNewFile = true;
     }
 
-    const proposedSha256 = computeSha256(input.proposedContent);
-    const hunks = generateDiffHunks(originalContent, input.proposedContent, 3);
+    let finalProposedContent: string;
+    let selectionRange: ZeroBasedRange | undefined;
+    let prefixPreserved: boolean | undefined;
+    let suffixPreserved: boolean | undefined;
+    let selectionExpansion:
+      | (SelectionExpansionReport & { explicitlyRequested?: boolean })
+      | undefined;
 
-    if (hunks.length === 0 && !isNewFile) {
-      throw new Error(`Proposed content for "${relativePath}" has no line differences from the current file.`);
+    if (editMode === "range") {
+      if (isNewFile) {
+        throw new RangeEditValidationError(
+          "INVALID_RANGE",
+          `Cannot apply mode="range" to non-existent file "${relativePath}". Use mode="full_file" to create a new file.`
+        );
+      }
+      if (!activeInlineCtx) {
+        throw new RangeEditValidationError(
+          "INVALID_RANGE",
+          `No active inline-edit selection context is registered for "${relativePath}". Start an inline edit first or use mode="full_file" in Agent Mode.`
+        );
+      }
+      if (typeof input.replacement !== "string") {
+        throw new RangeEditValidationError(
+          "MALFORMED_REPLACEMENT",
+          'mode="range" requires the "replacement" string parameter containing ONLY the replacement text for the selected range.'
+        );
+      }
+
+      const rangeResult = applyRangeReplacement(originalContent, activeInlineCtx, {
+        replacement: input.replacement,
+        expandedRange: input.expandedRange,
+        expansionReason: input.expansionReason,
+      });
+
+      finalProposedContent = rangeResult.reconstructedContent;
+      selectionRange = rangeResult.effectiveRange;
+      prefixPreserved = rangeResult.prefixPreserved;
+      suffixPreserved = rangeResult.suffixPreserved;
+      selectionExpansion = rangeResult.selectionExpansion;
+    } else {
+      // Explicit full-file edit (Agent Mode or new file creation)
+      const fullContent = input.content ?? input.proposedContent;
+      if (typeof fullContent !== "string") {
+        throw new SecurityError('Full-file proposal requires a UTF-8 "content" string.');
+      }
+      if (!isNewFile && originalContent.trim().length > 0 && fullContent.trim().length === 0) {
+        throw new RangeEditValidationError(
+          "EMPTY_REPLACEMENT",
+          `Refusing to replace non-empty file "${relativePath}" with empty content.`
+        );
+      }
+      finalProposedContent = fullContent;
+
+      if (
+        !isNewFile &&
+        payload.selectionConstraint &&
+        payload.selectionConstraint.relativePath.replace(/\\/g, "/").toLowerCase() ===
+          relativePath.toLowerCase()
+      ) {
+        selectionExpansion = detectSelectionExpansion(
+          originalContent,
+          finalProposedContent,
+          payload.selectionConstraint.startLine,
+          payload.selectionConstraint.endLine
+        );
+      }
     }
 
-    let selectionExpansion: SelectionExpansionReport | undefined;
-    if (
-      !isNewFile &&
-      payload.selectionConstraint &&
-      payload.selectionConstraint.relativePath.replace(/\\/g, "/").toLowerCase() ===
-        relativePath.toLowerCase()
-    ) {
-      selectionExpansion = detectSelectionExpansion(
-        originalContent,
-        input.proposedContent,
-        payload.selectionConstraint.startLine,
-        payload.selectionConstraint.endLine
+    const byteLength = Buffer.byteLength(finalProposedContent, "utf8");
+    if (byteLength > MAX_FILE_SIZE_BYTES) {
+      throw new SecurityError(
+        `Proposed file content (${byteLength} bytes) exceeds maximum limit of ${MAX_FILE_SIZE_BYTES} bytes.`
+      );
+    }
+
+    const proposedSha256 = computeSha256(finalProposedContent);
+    const hunks = generateDiffHunks(originalContent, finalProposedContent, 3);
+
+    if (hunks.length === 0 && !isNewFile) {
+      throw new Error(
+        `Proposed content for "${relativePath}" has no line differences from the current file.`
       );
     }
 
@@ -253,18 +384,26 @@ export class ProposalStore {
           : `prop-${crypto.randomBytes(6).toString("hex")}`,
       runId,
       relativePath,
+      editMode,
       isNewFile,
       originalSha256,
       proposedSha256,
       originalContent,
-      proposedContent: input.proposedContent,
+      proposedContent: finalProposedContent,
       summary:
         input.summary?.trim() ||
-        (isNewFile ? `Create new file ${relativePath}` : `Modify ${relativePath}`),
+        (isNewFile
+          ? `Create new file ${relativePath}`
+          : editMode === "range"
+            ? `Inline range edit in ${relativePath}`
+            : `Modify ${relativePath}`),
       hunks,
       status: "pending",
       createdAt: existingIdx >= 0 ? payload.proposals[existingIdx].createdAt : now,
       updatedAt: now,
+      selectionRange,
+      prefixPreserved,
+      suffixPreserved,
       selectionExpansion,
     };
 

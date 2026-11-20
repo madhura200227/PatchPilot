@@ -156,6 +156,113 @@ describe("Unit: TrueForge MVP Integration (AgentManager, ApprovalManager, Diagno
     assert.ok(result.accumulatedText.includes("Proposed edit cleanly."));
   });
 
+  it("should merge shared-id model.message.delta tool call fragments and unwrap deferred call_tool approvals", async () => {
+    const state = new ExtensionState();
+    const logger = new MockLogger();
+    const approvedNames: string[] = [];
+    const seenToolCalls: string[] = [];
+
+    const streamEvents = [
+      { type: "turn.created", id: "ev-1", turnId: "turn-delta-1" },
+      {
+        type: "model.message",
+        id: "ev-msg-1",
+        threadId: "main",
+        content: "",
+      },
+      {
+        type: "model.message.delta",
+        id: "ev-msg-1",
+        threadId: "main",
+        toolCalls: [
+          {
+            index: 0,
+            id: "call-deferred-1",
+            type: "function",
+            function: {
+              name: "call_tool",
+              arguments: '{"mcp_server":"patchpilot-workspace","tool_name":"propose_edit",',
+            },
+            toolInfo: { type: "truefoundry-system", name: "call_tool" },
+          },
+        ],
+      },
+      {
+        type: "model.message.delta",
+        id: "ev-msg-1",
+        threadId: "main",
+        toolCalls: [
+          {
+            index: 0,
+            function: {
+              arguments: '"input":{"path":"src/flask/helpers.py","mode":"range","replacement":"def f(): pass"}}',
+            },
+          },
+        ],
+        finishReason: "tool_calls",
+      },
+      {
+        type: "tool.approval_required",
+        id: "ev-appr-1",
+        threadId: "main",
+        toolCalls: [{ id: "call-deferred-1", sourceEventId: "ev-msg-1" }],
+      },
+    ];
+
+    const resumedEvents = [
+      {
+        type: "tool.response",
+        id: "ev-resp-1",
+        threadId: "main",
+        toolCallId: "call-deferred-1",
+        content: '{"proposalId":"prop-range-1","editMode":"range"}',
+      },
+      { type: "model.message", id: "ev-msg-2", threadId: "main", content: "" },
+      { type: "model.message.delta", id: "ev-msg-2", threadId: "main", content: "Updated range cleanly." },
+      { type: "turn.done", id: "ev-done-1", state: { status: "done" } },
+    ];
+
+    async function* yieldEvents(items: unknown[]) {
+      for (const item of items) {
+        yield item;
+      }
+    }
+
+    const mockClient = {
+      sessions: {
+        createTurnStream: async () => yieldEvents(streamEvents),
+        createTurnEvents: async () => ({ data: [] }),
+        subscribeToTurn: async () => yieldEvents(resumedEvents),
+        getTurn: async () => ({ data: { id: "turn-delta-1", state: { status: "done" } } }),
+      },
+    } as unknown as TrueForge;
+
+    const factory: ITrueForgeClientFactory = { createClient: () => mockClient };
+    const approvalMgr = new ApprovalManager(factory, logger);
+    const streamMgr = new TurnStreamManager(factory, state, logger);
+
+    const result = await streamMgr.executeTurn(baseConfig, "sess-delta", "Inline edit", {
+      approvalManager: approvalMgr,
+      callbacks: {
+        onToolCall: (tc) => {
+          seenToolCalls.push(tc.name);
+        },
+        onApprovalRequired: (pending) => {
+          for (const p of pending) {
+            approvedNames.push(p.toolName);
+            void approvalMgr.submitDecision(baseConfig, p.toolCallId, true);
+          }
+        },
+      },
+    });
+
+    assert.strictEqual(result.terminalStatus, "COMPLETED");
+    assert.deepStrictEqual(seenToolCalls, ["propose_edit"]);
+    assert.deepStrictEqual(approvedNames, ["propose_edit"]);
+    assert.strictEqual(result.toolCalls[0].parsedArguments?.mode, "range");
+    assert.ok(result.accumulatedText.includes("Updated range cleanly."));
+  });
+
   it("should retry transient 503/network failures with backoff and NEVER retry 401 auth errors", async () => {
     assert.strictEqual(isRetryableTrueForgeError(Object.assign(new Error("Unauthorized"), { statusCode: 401 })), false);
     assert.strictEqual(isRetryableTrueForgeError(Object.assign(new Error("Rate limit"), { statusCode: 429 })), true);

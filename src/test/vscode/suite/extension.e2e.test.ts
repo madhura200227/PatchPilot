@@ -140,6 +140,66 @@ describe("VS Code Extension Development Host E2E Verification", function () {
     assert.strictEqual(sessionSnap.mcpStatus, "running");
   });
 
+  it("5b. Preserves exact unselected prefix/suffix via range-edit proposal and rejects full_file during active inline edit in real VS Code", async () => {
+    const targetPath = path.join(workspaceRoot, "src", "helpers.py");
+    const originalContent = fs.readFileSync(targetPath, "utf8");
+    const lines = originalContent.split(/\r?\n/);
+
+    const store = api.controller.getMcpAdapter().getProposalStore();
+    assert.ok(store, "ProposalStore must be initialized");
+
+    const { captureSelectionContext } = await import("../../../workspace/rangeEdit");
+    const ctx = captureSelectionContext(
+      "src/helpers.py",
+      originalContent,
+      { start: { line: 2, character: 0 }, end: { line: 5, character: lines[5].length } },
+      1
+    );
+
+    store.setActiveRun("run-vscode-range-test", undefined, ctx);
+
+    // Must reject full_file while inline edit is active
+    let blocked = false;
+    try {
+      await store.createOrUpdateProposal({
+        relativePath: "src/helpers.py",
+        mode: "full_file",
+        content: "def get_debug_flag():\n    return False\n",
+      });
+    } catch {
+      blocked = true;
+    }
+    assert.strictEqual(blocked, true, "full_file must be rejected while inline edit is active");
+
+    // Range replacement must preserve prefix and suffix verbatim and apply/undo cleanly via WorkspaceEdit
+    const created = await store.createOrUpdateProposal({
+      relativePath: "src/helpers.py",
+      mode: "range",
+      replacement: [
+        "def get_debug_flag() -> bool:",
+        '    """Get whether debug mode should be enabled (false for unset, "", 0, false, no, off, n)."""',
+        '    val = os.environ.get("FLASK_DEBUG")',
+        '    return bool(val and val.lower() not in {"0", "false", "no", "off", "n"})',
+      ].join("\n"),
+    });
+    assert.strictEqual(created.proposal.editMode, "range");
+    assert.strictEqual(created.proposal.prefixPreserved, true);
+    assert.strictEqual(created.proposal.suffixPreserved, true);
+    assert.strictEqual(created.proposal.hunks.length, 1);
+
+    api.controller.setHunkDecision(created.proposal.proposalId, created.proposal.hunks[0].id, "accepted");
+    await vscode.commands.executeCommand("patchpilot.applyAcceptedChanges");
+
+    const appliedText = fs.readFileSync(targetPath, "utf8");
+    assert.ok(appliedText.includes('"off", "n"'));
+    assert.ok(appliedText.includes("def helper_two() -> int:\n    return 1"));
+
+    await vscode.commands.executeCommand("patchpilot.undoLastApply");
+    assert.strictEqual(fs.readFileSync(targetPath, "utf8"), originalContent);
+
+    store.setActiveRun(null, null, null);
+  });
+
   it("6. Cleanly stops managed MCP child process on controller disposal", async () => {
     await api.controller.dispose();
     assert.strictEqual(api.controller.getMcpAdapter().getStatus().state, "stopped");

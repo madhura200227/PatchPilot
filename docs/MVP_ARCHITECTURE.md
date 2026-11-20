@@ -95,7 +95,7 @@ The out-of-process server (`dist/mcpServer.js`) binds strictly to `127.0.0.1` on
 | `read_workspace_file` | `readOnlyHint: true` | Safe UTF-8 text read with SHA-256 and optional line slice |
 | `read_workspace_symbol` | `readOnlyHint: true` | Function/class/method/interface/doc heading lookup with snippet |
 | `get_context_plan` | `readOnlyHint: true` | Explains selected files, rationale, and remaining estimated budget |
-| `propose_edit` | `readOnlyHint: false` | Records proposal + unified diff in isolated `ProposalStore` (never writes workspace) |
+| `propose_edit` | `readOnlyHint: false` | Explicit `mode: "range"` (inline edit: splices `replacement` between preserved prefix & suffix with 6 invariants) or `mode: "full_file"` (Agent Mode / new files) in isolated `ProposalStore` (never writes workspace) |
 | `run_workspace_command` | `destructiveHint: true` | Runs allowlisted command in disposable overlay containing staged proposals |
 
 ---
@@ -112,10 +112,12 @@ The out-of-process server (`dist/mcpServer.js`) binds strictly to `127.0.0.1` on
 
 ## 5. Inline Edit & Multi-File Proposal Flows
 
-- **Inline Edit (`patchpilot.inlineEdit`, `Ctrl+Shift+I` / `Cmd+Shift+I`):**
-  1. Captures active editor workspace-relative path, 1-based selection range, selected code, +/-15 lines of surrounding context, document version, and SHA-256 baseline.
-  2. Registers an `InlineSelectionConstraint` on the MCP server/ProposalStore.
-  3. Sends a TrueForge turn; if `propose_edit` modifies lines outside the selected range, `detectSelectionExpansion()` flags the expansion prominently in the Review panel.
+- **Inline Edit (`patchpilot.inlineEdit`, `Ctrl+Shift+I` / `Cmd+Shift+I`, explicit `mode: "range"`):**
+  1. Checks for unsaved buffer edits (`doc.isDirty`) and captures an immutable `InlineEditContext` (`src/workspace/rangeEdit.ts`) with workspace-relative path, zero-based UTF-16 `range` (`start`/`end` line + character), exact UTF-16 `startOffset`/`endOffset`, verbatim `selectedText`, EOL style (`\r\n`/`\n`), `originalVersion`, and full-file `originalSha256`.
+  2. Registers `InlineEditContext` on the MCP server/ProposalStore; any attempt to call `propose_edit(mode="full_file")` on that file during an active inline edit is rejected hard (`FULL_FILE_REJECTED_IN_INLINE_EDIT`).
+  3. Sends a TrueForge range-edit prompt instructing `propose_edit(mode="range", replacement=...)` for ONLY the selected region.
+  4. `applyRangeReplacement()` verifies file SHA-256 and selection boundaries (Invariant 3), rejects empty/truncated/fenced/accidental-full-file replacements (Invariant 4), mechanically splices `prefix + normalizedReplacement + suffix` preserving exact code-unit-for-code-unit prefix and suffix (Invariants 1 & 2), and requires explicit `expandedRange` + `expansionReason` if lines outside the selection must change (Invariant 6).
+  5. Stores the reconstructed full-file proposal strictly in temporary proposal storage (Invariant 5) and renders the localized diff hunk in the Review panel with a `RANGE EDIT` + `PREFIX/SUFFIX PRESERVED` badge (or explicit Selection Expansion Notice if expanded).
 - **Multi-File Agent Mode (`patchpilot.startAgentRun` / Agent Panel):**
   1. When no files are mentioned by the user, PatchPilot does **not** inject guessed filenames into the prompt; TrueForge independently invokes `search_workspace`, `get_context_plan`, and `read_workspace_file` to discover target files.
   2. Multiple `propose_edit` calls accumulate per-file proposals in isolated temporary storage (`%TEMP%/patchpilot-proposals/...`).

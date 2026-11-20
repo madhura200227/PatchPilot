@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { ILogger } from "../output/logger";
 import { McpChildErrorMessage, McpChildInitMessage, McpChildReadyMessage } from "./mcpServerEntry";
 import { InlineSelectionConstraint } from "./proposalStore";
+import { InlineEditContext } from "./rangeEdit";
 
 /**
  * PatchPilot Out-of-Process MCP Server Lifecycle Supervisor
@@ -288,7 +289,8 @@ export class WorkspaceProcessManager {
 
   public async setActiveRun(
     runId: string | null,
-    selectionConstraint?: InlineSelectionConstraint | null
+    selectionConstraint?: InlineSelectionConstraint | null,
+    inlineEditContext?: InlineEditContext | null
   ): Promise<void> {
     if (!this.controlBaseUrl || !this.authToken || this.state !== "running") {
       return;
@@ -299,7 +301,7 @@ export class WorkspaceProcessManager {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.authToken}`,
       },
-      body: JSON.stringify({ runId, selectionConstraint }),
+      body: JSON.stringify({ runId, selectionConstraint, inlineEditContext }),
     });
   }
 

@@ -20,6 +20,7 @@ import {
 import { isSensitiveFilePath, sanitizeSecretText } from "../security/secretFilter";
 import { runCommandInExecutionOverlay } from "./executionOverlay";
 import { InlineSelectionConstraint, ProposalStore } from "./proposalStore";
+import { EditMode, InlineEditContext, ZeroBasedRange } from "./rangeEdit";
 
 /**
  * PatchPilot Production Workspace MCP Server
@@ -221,7 +222,7 @@ export const PATCHPILOT_MCP_TOOLS = [
   {
     name: "propose_edit",
     description:
-      "Submit a proposed file modification or new file into PatchPilot's isolated proposal store for human hunk-by-hunk review. Does NOT write directly to the user's workspace on disk.",
+      "Submit a proposed file edit into PatchPilot's isolated proposal store for human hunk-by-hunk review without mutating disk. Supports explicit modes: mode='range' (REQUIRED for inline edits: pass ONLY 'replacement' for the selected range while PatchPilot preserves prefix and suffix mechanically, plus optional 'expandedRange' and 'expansionReason' if lines outside the selection must change) or mode='full_file' (for Agent Mode full-file edits and creating new files: pass complete UTF-8 'content').",
     annotations: {
       title: "Propose File Edit",
       readOnlyHint: false,
@@ -236,16 +237,57 @@ export const PATCHPILOT_MCP_TOOLS = [
           type: "string",
           description: "Workspace-relative file path to modify or create.",
         },
+        mode: {
+          type: "string",
+          enum: ["range", "full_file"],
+          description:
+            "Explicit edit mode. Use 'range' for inline edits (with 'replacement') and 'full_file' for Agent Mode full-file edits or new files (with 'content').",
+        },
+        replacement: {
+          type: "string",
+          description:
+            "Required when mode='range': ONLY the updated source code replacing the selected (or expanded) range. Do NOT include unselected imports, other functions, or markdown fences.",
+        },
         content: {
           type: "string",
-          description: "Complete proposed UTF-8 file content.",
+          description:
+            "Required when mode='full_file': complete proposed UTF-8 file content (blocked during active inline-edit runs).",
+        },
+        expandedRange: {
+          type: "object",
+          description:
+            "Optional zero-based UTF-16 range ({ start: { line, character }, end: { line, character } }) when an inline edit genuinely requires modifying lines outside the user's original selection. Requires 'expansionReason'.",
+          properties: {
+            start: {
+              type: "object",
+              properties: {
+                line: { type: "number" },
+                character: { type: "number" },
+              },
+              required: ["line", "character"],
+            },
+            end: {
+              type: "object",
+              properties: {
+                line: { type: "number" },
+                character: { type: "number" },
+              },
+              required: ["line", "character"],
+            },
+          },
+          required: ["start", "end"],
+        },
+        expansionReason: {
+          type: "string",
+          description:
+            "Required when expandedRange is provided: clear explanation of why lines outside the selected region must change.",
         },
         summary: {
           type: "string",
           description: "Concise explanation of the proposed change.",
         },
       },
-      required: ["path", "content"],
+      required: ["path"],
     },
   },
   {
@@ -633,23 +675,52 @@ export async function createWorkspaceMcpServer(
             if (typeof args.path !== "string" || !args.path.trim()) {
               throw new Error("Missing required string argument 'path'.");
             }
-            if (typeof args.content !== "string") {
-              throw new Error("Missing required string argument 'content'.");
+            const rawMode = args.mode;
+            let editMode: EditMode | undefined;
+            if (rawMode !== undefined) {
+              if (rawMode !== "range" && rawMode !== "full_file") {
+                throw new Error('Invalid argument \'mode\': expected "range" or "full_file".');
+              }
+              editMode = rawMode;
             }
+
+            const hasReplacement = typeof args.replacement === "string";
+            const hasContent = typeof args.content === "string";
+            if (!editMode) {
+              if (hasReplacement && !hasContent) {
+                editMode = "range";
+              } else {
+                editMode = "full_file";
+              }
+            }
+
+            const expandedRange =
+              args.expandedRange && typeof args.expandedRange === "object"
+                ? (args.expandedRange as ZeroBasedRange)
+                : undefined;
+
             const created = await proposalStore.createOrUpdateProposal({
               relativePath: args.path,
-              proposedContent: args.content,
+              mode: editMode,
+              replacement: hasReplacement ? (args.replacement as string) : undefined,
+              content: hasContent ? (args.content as string) : undefined,
+              expandedRange,
+              expansionReason:
+                typeof args.expansionReason === "string" ? args.expansionReason : undefined,
               summary: typeof args.summary === "string" ? args.summary : undefined,
             });
             payload = {
               proposalId: created.proposal.proposalId,
               relativePath: created.proposal.relativePath,
+              editMode: created.proposal.editMode,
               isNewFile: created.proposal.isNewFile,
               originalSha256: created.proposal.originalSha256,
               proposedSha256: created.proposal.proposedSha256,
               hunkCount: created.proposal.hunks.length,
               addedLines: created.addedLines,
               removedLines: created.removedLines,
+              prefixPreserved: created.proposal.prefixPreserved,
+              suffixPreserved: created.proposal.suffixPreserved,
               selectionExpansion: created.proposal.selectionExpansion,
               note: "Proposal recorded in isolated PatchPilot proposal storage. Workspace on disk was NOT modified; human review and approval are required to apply.",
               unifiedDiff: created.unifiedDiff,
@@ -857,8 +928,13 @@ export async function createWorkspaceMcpServer(
           const body = (await readJsonBody(req)) as {
             runId?: string | null;
             selectionConstraint?: InlineSelectionConstraint | null;
+            inlineEditContext?: InlineEditContext | null;
           };
-          proposalStore.setActiveRun(body?.runId ?? null, body?.selectionConstraint);
+          proposalStore.setActiveRun(
+            body?.runId ?? null,
+            body?.selectionConstraint,
+            body?.inlineEditContext
+          );
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true, activeRunId: proposalStore.getActiveRunId() }));
           return;
