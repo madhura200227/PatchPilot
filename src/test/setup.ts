@@ -33,11 +33,11 @@ class MockEventEmitter<T = unknown> {
 }
 
 class MockPosition {
-  constructor(public readonly line: number, public readonly character: number) {}
+  constructor(public readonly line: number, public readonly character: number) { }
 }
 
 class MockRange {
-  constructor(public readonly start: MockPosition, public readonly end: MockPosition) {}
+  constructor(public readonly start: MockPosition, public readonly end: MockPosition) { }
 }
 
 class MockWorkspaceEdit {
@@ -60,21 +60,21 @@ const mockCommands = new Map<string, (...args: unknown[]) => unknown>();
 
 const mockOutputChannel = {
   name: "PatchPilot",
-  append: () => {},
-  appendLine: () => {},
-  clear: () => {},
-  show: () => {},
-  hide: () => {},
-  dispose: () => {},
+  append: () => { },
+  appendLine: () => { },
+  clear: () => { },
+  show: () => { },
+  hide: () => { },
+  dispose: () => { },
 };
 
 const mockStatusBarItem = {
   text: "",
   tooltip: "",
   command: "",
-  show: () => {},
-  hide: () => {},
-  dispose: () => {},
+  show: () => { },
+  hide: () => { },
+  dispose: () => { },
 };
 
 const mockWorkspaceConfig = {
@@ -86,7 +86,7 @@ const mockWorkspaceConfig = {
   },
   has: () => true,
   inspect: () => undefined,
-  update: async () => {},
+  update: async () => { },
 };
 
 export const mockVscode = {
@@ -128,7 +128,7 @@ export const mockVscode = {
   },
   env: {
     clipboard: {
-      writeText: async () => {},
+      writeText: async () => { },
     },
     openExternal: async () => true,
   },
@@ -136,16 +136,16 @@ export const mockVscode = {
     activeTextEditor: undefined,
     createOutputChannel: () => mockOutputChannel,
     createStatusBarItem: () => mockStatusBarItem,
-    registerWebviewViewProvider: () => ({ dispose: () => {} }),
+    registerWebviewViewProvider: () => ({ dispose: () => { } }),
     createWebviewPanel: () => ({
       webview: {
         html: "",
         postMessage: async () => true,
-        onDidReceiveMessage: () => ({ dispose: () => {} }),
+        onDidReceiveMessage: () => ({ dispose: () => { } }),
       },
-      reveal: () => {},
-      onDidDispose: () => ({ dispose: () => {} }),
-      dispose: () => {},
+      reveal: () => { },
+      onDidDispose: () => ({ dispose: () => { } }),
+      dispose: () => { },
     }),
     showInformationMessage: async (msg: string) => msg,
     showWarningMessage: async (msg: string) => msg,
@@ -155,9 +155,9 @@ export const mockVscode = {
     withProgress: async (_opts: unknown, task: (p: unknown, token: unknown) => Promise<unknown>) => {
       const token = {
         isCancellationRequested: false,
-        onCancellationRequested: () => ({ dispose: () => {} }),
+        onCancellationRequested: () => ({ dispose: () => { } }),
       };
-      return task({ report: () => {} }, token);
+      return task({ report: () => { } }, token);
     },
   },
   commands: {
@@ -183,9 +183,9 @@ export const mockVscode = {
     workspaceFolders: undefined,
     textDocuments: [],
     getConfiguration: () => mockWorkspaceConfig,
-    onDidChangeConfiguration: () => ({ dispose: () => {} }),
-    onDidGrantWorkspaceTrust: () => ({ dispose: () => {} }),
-    registerTextDocumentContentProvider: () => ({ dispose: () => {} }),
+    onDidChangeConfiguration: () => ({ dispose: () => { } }),
+    onDidGrantWorkspaceTrust: () => ({ dispose: () => { } }),
+    registerTextDocumentContentProvider: () => ({ dispose: () => { } }),
     openTextDocument: async (uri: { fsPath: string }) => {
       const text = fs.existsSync(uri.fsPath) ? fs.readFileSync(uri.fsPath, "utf8") : "";
       const lines = text.split(/\r?\n/);

@@ -99,10 +99,10 @@ export function activate(context: vscode.ExtensionContext): PatchPilotExtensionA
   const trustSub =
     typeof vscode.workspace.onDidGrantWorkspaceTrust === "function"
       ? vscode.workspace.onDidGrantWorkspaceTrust(() => {
-          logger.info("Workspace trust granted. PatchPilot workspace tools are now enabled.");
-          controller.emitUiUpdate();
-        })
-      : { dispose: () => {} };
+        logger.info("Workspace trust granted. PatchPilot workspace tools are now enabled.");
+        controller.emitUiUpdate();
+      })
+      : { dispose: () => { } };
 
   // Register MVP commands
   const mvpCmds = registerMvpCommands(controller, agentViewProvider, reviewPanelProvider, logger);

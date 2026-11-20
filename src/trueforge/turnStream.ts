@@ -350,7 +350,7 @@ export class TurnStreamManager {
             }
             this.logger.info(
               `[EVENT: turn.done] Terminal Status: ${termStatus}` +
-                (classified.terminalReason ? ` (Reason: ${sanitizeSecretText(classified.terminalReason)})` : "")
+              (classified.terminalReason ? ` (Reason: ${sanitizeSecretText(classified.terminalReason)})` : "")
             );
             callbacks?.onTurnDone?.(result.terminalStatus, result.error);
             break;
